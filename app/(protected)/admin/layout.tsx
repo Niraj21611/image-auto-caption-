@@ -1,14 +1,25 @@
+"use client";
+
+import { SidebarProvider } from "@/components/ui/sidebar";
 import Sidebar from "@/components/Sidebar/Sidebar";
 
-export default function AdminLayout({
-  children,
-}: {
+interface LayoutProps {
   children: React.ReactNode;
-}) {
+}
+
+export default function DashboardLayout({ children }: LayoutProps) {
   return (
-    <div className="flex min-h-screen">
-      <Sidebar />
-      <main className="flex-1 p-6">{children}</main>
-    </div>
+    <SidebarProvider>
+      <div className="min-h-screen flex w-full">
+        <Sidebar />
+
+        {/* Right content */}
+        <div className="flex-1 flex flex-col h-screen">
+          <main className="overflow-y-auto">
+            <div className="w-full min-h-full">{children}</div>
+          </main>
+        </div>
+      </div>
+    </SidebarProvider>
   );
 }

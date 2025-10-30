@@ -18,7 +18,7 @@ import { Settings, User } from "lucide-react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 
-export function ProfileButton() {
+export default function ProfileButton() {
   const router = useRouter();
   const { data: session } = useSession();
 

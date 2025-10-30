@@ -1,19 +1,6 @@
 "use client";
 
-import type React from "react";
-import {
-  BookOpen,
-  Settings,
-  Users,
-  PlusCircle,
-  Home,
-  GraduationCap,
-  Library,
-  Package,
-  Eye,
-  LogOut,
-  ChevronRight,
-} from "lucide-react";
+import { Home, Users, Settings, LogOut } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -21,245 +8,134 @@ import { usePathname } from "next/navigation";
 import Link from "next/link";
 import { useSession, signOut } from "next-auth/react";
 
-// shadcn sidebar
 import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
-  SidebarMenuSub,
-  SidebarMenuSubItem,
   SidebarTrigger,
   useSidebar,
 } from "@/components/ui/sidebar";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
+
 import { useIsMobile } from "@/hooks/use-is-mobile";
-import { ProfileButton } from "./profileButton";
+import ProfileButton from "./ProfileButton";
 
-// ---------------- DATA ----------------
-const navigationItems = [{ title: "Dashboard", url: "/", icon: Home }];
-
-const courseManagementItems = [
-  { title: "All Courses", url: "/course", icon: BookOpen },
-  { title: "Manage Courses", url: "/course/manage", icon: Settings },
-];
-
-const meetingItems = [
-  { title: "Live Classes", url: "/meet", icon: Users },
-  { title: "Create Meeting", url: "/meet/manage", icon: PlusCircle },
-];
-
-const adminItems = [
-  { title: "Instructors", url: "/admin/instructor", icon: Users },
-  { title: "Students", url: "/student", icon: Users },
-  { title: "Classes", url: "/admin/class", icon: GraduationCap },
-  { title: "Subjects", url: "/admin/subject", icon: Library },
-];
-
-const subscriptionItems = [
-  {
-    title: "Manage Subscriptions",
-    url: "/subscription/manage",
-    icon: Settings,
-  },
-  { title: "All Subscriptions", url: "/subscription/all", icon: Package },
-  { title: "User Subscriptions", url: "/subscription/users", icon: Eye },
-];
-
-// student-specific
-const studentItems = [
-  { title: "All Courses", url: "/student/course", icon: BookOpen },
-];
-
-// ---------------- COMPONENT ----------------
 export default function Sidebar() {
   const pathname = usePathname();
   const { state } = useSidebar();
   const isOpen = state === "expanded";
-
-  const isMobile = useIsMobile();
   const isCollapsed = state === "collapsed";
+  const isMobile = useIsMobile();
   const { data: session } = useSession();
-  const role = session?.user?.role; // make sure your session includes `role`
+  const role = session?.user?.role;
 
-  const isActive = (path: string) =>
-    path === "/" ? pathname === "/" : pathname === path;
+  const isActive = (path: string) => pathname === path;
+
+  // Sidebar items based on role
+  const sidebarItems =
+    role === "ADMIN"
+      ? [
+          { title: "Dashboard", url: "/admin", icon: Home },
+          { title: "User Management", url: "/admin/users", icon: Users },
+          { title: "Settings", url: "/admin/settings", icon: Settings },
+        ]
+      : [
+          { title: "Dashboard", url: "/user", icon: Home },
+          { title: "My Profile", url: "/user/profile", icon: Users },
+          { title: "Settings", url: "/user/settings", icon: Settings },
+        ];
 
   return (
     <aside
       className={cn(
-        "fixed left-0 top-0 z-50 h-screen bg-card border-r border-border transition-all duration-300 ease-in-out",
+        "fixed left-0 top-0 z-50 h-screen bg-neutral-50 border-r border-neutral-200 transition-all duration-300 ease-in-out shadow-sm",
         isOpen ? "w-64" : "w-16",
         "lg:relative lg:z-auto"
       )}
     >
       {/* Header */}
-      <div className="border-b p-4 flex items-center justify-between">
+      <div className="border-b border-neutral-200 p-4 flex items-center justify-between bg-white">
         {isOpen ? (
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
-              <BookOpen className="w-5 h-5 text-primary-foreground" />
+            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-600 to-blue-700 flex items-center justify-center shadow-md">
+              <Home className="w-4 h-4 text-white" />
             </div>
-            <span className="font-oracle font-bold text-lg">EduPlatform</span>
+            <span className="font-bold text-lg text-neutral-800">Sakal</span>
           </div>
         ) : (
-          <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center mx-auto">
-            <BookOpen className="w-5 h-5 text-primary-foreground" />
+          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-600 to-blue-700 flex items-center justify-center mx-auto shadow-md">
+            <Home className="w-4 h-4 text-white" />
           </div>
         )}
-        {/* Mobile trigger */}
-        <SidebarTrigger className="p-2 hover:bg-accent rounded-md transition-colors lg:hidden" />
+        <SidebarTrigger className="p-2 hover:bg-neutral-100 rounded-md transition-colors lg:hidden text-neutral-600" />
       </div>
 
       {/* Navigation */}
       <div className="flex flex-col h-[calc(100vh-4rem)] mt-2">
         <ScrollArea className="flex-1 overflow-hidden">
-          <div className="p-2 space-y-4">
-            {/* Show Admin sidebar */}
-            {role === "ADMIN" && (
-              <>
-                <SidebarSection
-                  title="Navigation"
-                  items={navigationItems}
-                  isActive={isActive}
-                />
-                <SidebarSection
-                  title="Course "
-                  items={courseManagementItems}
-                  isActive={isActive}
-                />
-                <SidebarSection
-                  title="Meeting"
-                  items={meetingItems}
-                  isActive={isActive}
-                />
-                <SidebarSection
-                  title="Admin "
-                  items={adminItems}
-                  isActive={isActive}
-                />
-                <SidebarSection
-                  title="Subscription "
-                  items={subscriptionItems}
-                  isActive={isActive}
-                />
-              </>
-            )}
+          <SidebarMenu className="px-4 py-6 space-y-3">
+            {sidebarItems.map((item) => {
+              const Icon = item.icon;
+              const active = isActive(item.url);
 
-            {/* Show Student sidebar */}
-            {role === "USER" && (
-              <SidebarSection
-                title="Course"
-                items={studentItems}
-                isActive={isActive}
-              />
-            )}
-          </div>
+              return (
+                <SidebarMenuItem key={item.title}>
+                  <SidebarMenuButton
+                    asChild
+                    isActive={active}
+                    className={cn(
+                      "flex items-center gap-4 p-6 text-base font-medium rounded-xl transition-all duration-200",
+                      active
+                        ? "bg-blue-600 text-white shadow-md hover:bg-blue-700"
+                        : "text-neutral-700 hover:bg-white hover:text-blue-600 hover:shadow-sm"
+                    )}
+                  >
+                    <Link
+                      href={item.url}
+                      className="flex items-center gap-4 w-full p-4"
+                    >
+                      <Icon
+                        className={cn(
+                          "h-5 w-5 shrink-0",
+                          active ? "text-white" : "text-neutral-500"
+                        )}
+                      />
+                      {!isCollapsed && (
+                        <span className="truncate">{item.title}</span>
+                      )}
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              );
+            })}
+          </SidebarMenu>
         </ScrollArea>
 
-        {/* Bottom Logout */}
-        <div className="border-t p-4">
+        {/* Footer */}
+        <div className="border-t border-neutral-200 p-4 bg-white">
           <div
             className={cn(
-              "flex w-full items-center",
-              isCollapsed && !isMobile ? "flex-col gap-2" : "justify-between"
+              "flex w-full items-center gap-2",
+              isCollapsed && !isMobile ? "flex-col" : "justify-between"
             )}
           >
-            <div className="flex items-center gap-2">
-              <ProfileButton />
-            </div>
+            <ProfileButton />
             <Button
               variant="outline"
               size="icon"
               onClick={() => signOut()}
               title="Logout"
-              className={cn("bg-red-500", isCollapsed && !isMobile && "mt-2")}
+              className={cn(
+                "bg-red-50 hover:bg-red-100 border-red-200 text-red-600 hover:text-red-700 transition-colors shadow-sm",
+                isCollapsed && !isMobile && "mt-2"
+              )}
             >
-              <LogOut className="h-4 w-4 text-white" />
+              <LogOut className="h-4 w-4" />
             </Button>
           </div>
         </div>
       </div>
 
-      {/* Desktop trigger */}
-      <SidebarTrigger className="absolute top-4 -right-3 hidden lg:flex w-6 h-6 bg-card border border-border rounded-full items-center justify-center text-muted-foreground hover:text-foreground transition-colors z-60" />
+      <SidebarTrigger className="absolute top-4 -right-3 hidden lg:flex w-6 h-6 bg-white border border-neutral-200 rounded-full items-center justify-center text-neutral-500 hover:text-blue-600 hover:border-blue-300 transition-all shadow-sm z-60" />
     </aside>
-  );
-}
-
-// ---------------- SidebarSection ----------------
-function SidebarSection({
-  title,
-  items,
-  isActive,
-}: {
-  title: string;
-  items: { title: string; url: string; icon: React.ComponentType<any> }[];
-  isActive: (path: string) => boolean;
-}) {
-  const ParentIcon = items[0]?.icon ?? ChevronRight;
-  const { state } = useSidebar();
-  const isCollapsed = state === "collapsed";
-
-  return (
-    <SidebarMenu>
-      <SidebarMenuItem>
-        <Collapsible defaultOpen className="group/collapsible">
-          <CollapsibleTrigger asChild>
-            <SidebarMenuButton
-              className={cn(
-                "flex items-center justify-between text-xs font-semibold uppercase tracking-wider text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground",
-                isCollapsed && "justify-center p-3"
-              )}
-            >
-              <span
-                className={cn(
-                  "flex items-center gap-2",
-                  isCollapsed && "justify-center"
-                )}
-              >
-                <ParentIcon className="h-4 w-4" />
-                {!isCollapsed && <span>{title}</span>}
-              </span>
-              {!isCollapsed && (
-                <ChevronRight className="h-3 w-3 ml-auto transition-transform group-data-[state=open]/collapsible:rotate-90" />
-              )}
-            </SidebarMenuButton>
-          </CollapsibleTrigger>
-
-          {!isCollapsed && (
-            <CollapsibleContent>
-              <SidebarMenuSub>
-                {items.map((item) => {
-                  const Icon = item.icon;
-                  const itemIsActive = isActive(item.url);
-                  return (
-                    <SidebarMenuSubItem key={item.title}>
-                      <SidebarMenuButton
-                        asChild
-                        isActive={itemIsActive}
-                        className={cn(
-                          "transition-colors hover:bg-accent/50 hover:text-foreground",
-                          itemIsActive &&
-                            "bg-black text-white hover:bg-black/90 hover:text-white"
-                        )}
-                      >
-                        <Link href={item.url}>
-                          <Icon className="h-4 w-4" />
-                          <span>{item.title}</span>
-                        </Link>
-                      </SidebarMenuButton>
-                    </SidebarMenuSubItem>
-                  );
-                })}
-              </SidebarMenuSub>
-            </CollapsibleContent>
-          )}
-        </Collapsible>
-      </SidebarMenuItem>
-    </SidebarMenu>
   );
 }
