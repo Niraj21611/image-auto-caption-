@@ -35,13 +35,13 @@ export default function Sidebar() {
     role === "ADMIN"
       ? [
           { title: "Dashboard", url: "/admin", icon: Home },
-          { title: "User Management", url: "/admin/users", icon: Users },
-          { title: "Settings", url: "/admin/settings", icon: Settings },
+          { title: "User Management", url: "/admin/user", icon: Users },
+          { title: "Settings", url: "/admin/setting", icon: Settings },
         ]
       : [
           { title: "Dashboard", url: "/user", icon: Home },
           { title: "My Profile", url: "/user/profile", icon: Users },
-          { title: "Settings", url: "/user/settings", icon: Settings },
+          { title: "Settings", url: "/user/setting", icon: Settings },
         ];
 
   return (
@@ -56,13 +56,13 @@ export default function Sidebar() {
       <div className="border-b border-neutral-200 p-4 flex items-center justify-between bg-white">
         {isOpen ? (
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-600 to-blue-700 flex items-center justify-center shadow-md">
+            <div className="w-8 h-8 rounded-lg bg-linear-to-br from-blue-600 to-blue-700 flex items-center justify-center shadow-md">
               <Home className="w-4 h-4 text-white" />
             </div>
             <span className="font-bold text-lg text-neutral-800">Sakal</span>
           </div>
         ) : (
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-600 to-blue-700 flex items-center justify-center mx-auto shadow-md">
+          <div className="w-8 h-8 rounded-lg bg-linear-to-br from-blue-600 to-blue-700 flex items-center justify-center mx-auto shadow-md">
             <Home className="w-4 h-4 text-white" />
           </div>
         )}
@@ -83,15 +83,15 @@ export default function Sidebar() {
                     asChild
                     isActive={active}
                     className={cn(
-                      "flex items-center gap-4 p-6 text-base font-medium rounded-xl transition-all duration-200",
+                      "flex items-center gap-4 p-6 text-base font-medium rounded-md transition-all duration-200",
                       active
-                        ? "bg-blue-600 text-white shadow-md hover:bg-blue-700"
+                        ? "bg-blue-600! text-white! shadow-md hover:bg-blue-700!"
                         : "text-neutral-700 hover:bg-white hover:text-blue-600 hover:shadow-sm"
                     )}
                   >
                     <Link
                       href={item.url}
-                      className="flex items-center gap-4 w-full p-4"
+                      className="flex items-center gap-4 w-full p-4 "
                     >
                       <Icon
                         className={cn(
