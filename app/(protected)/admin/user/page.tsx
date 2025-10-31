@@ -9,6 +9,7 @@ import {
   Pencil,
   Trash2,
   Key,
+  Search,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -65,6 +66,7 @@ export default function Page() {
   const [showPassword, setShowPassword] = useState(false);
   const [showAddPassword, setShowAddPassword] = useState(false);
   const [showNewPassword, setShowNewPassword] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
 
   const [formData, setFormData] = useState({
     name: "",
@@ -72,6 +74,15 @@ export default function Page() {
     password: "",
   });
   const [newPassword, setNewPassword] = useState("");
+
+  const sanitizePasswordInput = (value: string) => value.replace(/\s/g, "");
+
+  // Filter users based on search query
+  const filteredUsers = users.filter(
+    (user) =>
+      user.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      user.email.toLowerCase().includes(searchQuery.toLowerCase())
+  );
 
   useEffect(() => {
     const fetchUsers = async () => {
@@ -222,26 +233,14 @@ export default function Page() {
       <div className="space-y-6">
         <div className="sticky top-0 z-50 bg-white border-b border-border">
           <div className="max-w-8xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div className="flex items-center justify-between h-16">
-              <div className="flex items-center gap-4">
-                <div>
-                  <h1 className="text-lg font-semibold text-foreground">
-                    User Management
-                  </h1>
-                  <p className="text-sm text-muted-foreground">
-                    Manage user and their profile
-                  </p>
-                </div>
-              </div>
-              <div className="flex items-center gap-3">
-                <Button
-                  variant="default"
-                  size="lg"
-                  onClick={() => setIsAddDialogOpen(true)}
-                >
-                  <Plus />
-                  Create User
-                </Button>
+            <div className="flex items-center h-16">
+              <div>
+                <h1 className="text-lg font-semibold text-foreground">
+                  User Management
+                </h1>
+                <p className="text-sm text-muted-foreground">
+                  Manage user and their profile
+                </p>
               </div>
             </div>
           </div>
@@ -265,29 +264,43 @@ export default function Page() {
     <div className="space-y-6">
       <div className="sticky top-0 z-50 bg-white border-b border-border">
         <div className="max-w-8xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between h-16">
-            <div className="flex items-center gap-4">
-              <div>
-                <h1 className="text-lg font-semibold text-foreground">
-                  User Management
-                </h1>
-                <p className="text-sm text-muted-foreground">
-                  Manage user and their profile
-                </p>
-              </div>
-            </div>
-            <div className="flex items-center gap-3">
-              <Button
-                variant="default"
-                size="lg"
-                onClick={() => setIsAddDialogOpen(true)}
-                className="bg-blue-600 hover:bg-blue-700 font-medium"
-              >
-                <Plus />
-                Create User
-              </Button>
+          <div className="flex items-center h-16">
+            <div>
+              <h1 className="text-lg font-semibold text-foreground">
+                User Management
+              </h1>
+              <p className="text-sm text-muted-foreground">
+                Manage user and their profile
+              </p>
             </div>
           </div>
+        </div>
+      </div>
+
+      {/* Search and Create User Section */}
+      <div className="px-6">
+        <div className="flex items-center justify-between gap-4">
+          {/* Search Bar */}
+          <div className="relative w-96">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+            <Input
+              type="text"
+              placeholder="Search users by name or email..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-10 h-11 bg-white border-gray-300 focus:border-blue-500 focus:ring-blue-500 rounded-lg shadow-sm"
+            />
+          </div>
+          {/* Create User Button */}
+          <Button
+            variant="default"
+            size="lg"
+            onClick={() => setIsAddDialogOpen(true)}
+            className="bg-blue-600 hover:bg-blue-700 font-medium h-11 px-6 shadow-sm"
+          >
+            <Plus className="h-5 w-5 mr-2" />
+            Create User
+          </Button>
         </div>
       </div>
 
@@ -334,11 +347,11 @@ export default function Page() {
           </div>
         </div>
       ) : (
-        <div className="p-6">
+        <div className="px-6 pb-6">
           <div className="bg-white rounded-lg border border-neutral-200 shadow-sm overflow-hidden p-4">
             <Table>
               <TableHeader>
-                <TableRow className=" border-b border-neutral-200 hover:bg-neutral-100">
+                <TableRow className="border-b border-neutral-200 hover:bg-neutral-100">
                   <TableHead className="font-semibold text-neutral-800 h-12">
                     Name
                   </TableHead>
@@ -351,15 +364,31 @@ export default function Page() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {users.map((user) => (
-                  <TableRow key={user.id} className="hover:bg-neutral-50 border-b border-neutral-100 last:border-0">
-                    <TableCell className="font-medium text-neutral-900 py-4">
-                      {user.name}
+                {filteredUsers.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={3} className="text-center py-12">
+                      <div className="flex flex-col items-center gap-2">
+                        <Search className="h-10 w-10 text-gray-300" />
+                        <p className="text-gray-500 font-medium">No users found</p>
+                        <p className="text-sm text-gray-400">
+                          Try adjusting your search query
+                        </p>
+                      </div>
                     </TableCell>
-                    <TableCell className="text-neutral-600 py-4">
-                      {user.email}
-                    </TableCell>
-                    <TableCell className="text-right py-4">
+                  </TableRow>
+                ) : (
+                  filteredUsers.map((user) => (
+                    <TableRow
+                      key={user.id}
+                      className="hover:bg-neutral-50 border-b border-neutral-100 last:border-0"
+                    >
+                      <TableCell className="font-medium text-neutral-900 py-4">
+                        {user.name}
+                      </TableCell>
+                      <TableCell className="text-neutral-600 py-4">
+                        {user.email}
+                      </TableCell>
+                      <TableCell className="text-right py-4">
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                           <Button
@@ -403,7 +432,8 @@ export default function Page() {
                       </DropdownMenu>
                     </TableCell>
                   </TableRow>
-                ))}
+                  ))
+                )}
               </TableBody>
             </Table>
           </div>
@@ -480,7 +510,10 @@ export default function Page() {
                   placeholder="Enter password"
                   value={formData.password}
                   onChange={(e) =>
-                    setFormData({ ...formData, password: e.target.value })
+                    setFormData({
+                      ...formData,
+                      password: sanitizePasswordInput(e.target.value),
+                    })
                   }
                   className="border-gray-300 focus:border-blue-500 focus:ring-blue-500 pr-10"
                 />
@@ -683,7 +716,9 @@ export default function Page() {
                   type={showNewPassword ? "text" : "password"}
                   placeholder="Enter new password"
                   value={newPassword}
-                  onChange={(e) => setNewPassword(e.target.value)}
+                  onChange={(e) =>
+                    setNewPassword(sanitizePasswordInput(e.target.value))
+                  }
                   className="border-gray-300 focus:border-blue-500 focus:ring-blue-500 pr-10"
                 />
                 <button
