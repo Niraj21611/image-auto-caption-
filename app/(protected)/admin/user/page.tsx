@@ -14,6 +14,7 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
+  RefreshCw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -82,6 +83,7 @@ export default function Page() {
   const [todayDurations, setTodayDurations] = useState<Record<string, UserOnlineStatus>>({});
   const [passwordCopied, setPasswordCopied] = useState(false);
   const [sortBy, setSortBy] = useState<"most-active" | "active-first" | "none">("none");
+  const [isRefreshing, setIsRefreshing] = useState(false);
   
   const [weeklyData, setWeeklyData] = useState<{
     daily: Array<{ date: string; minutes: number; formatted: string }>;
@@ -119,29 +121,31 @@ export default function Page() {
       return 0;
     });
 
-  useEffect(() => {
-    const fetchUsers = async () => {
-      try {
-        const res = await getAllUsers();
-        if (res.success && res.data) {
-          setUsers(res.data);
-          const ids = res.data.map((u: User) => u.id);
-          const d = await getUsersTodayDurations(ids);
-          if (d.success && d.data) {
-            setTodayDurations(d.data as any);
-          }
-        } else {
-          toast.error(res.error || "Failed to load users");
+  const fetchUsersData = async () => {
+    try {
+      setIsRefreshing(true);
+      const res = await getAllUsers();
+      if (res.success && res.data) {
+        setUsers(res.data);
+        const ids = res.data.map((u: User) => u.id);
+        const d = await getUsersTodayDurations(ids);
+        if (d.success && d.data) {
+          setTodayDurations(d.data as any);
         }
-      } catch (err) {
-        console.error("Error loading users:", err);
-        toast.error("Unexpected error while fetching users");
-      } finally {
-        setIsLoading(false);
+      } else {
+        toast.error(res.error || "Failed to load users");
       }
-    };
+    } catch (err) {
+      console.error("Error loading users:", err);
+      toast.error("Unexpected error while fetching users");
+    } finally {
+      setIsLoading(false);
+      setIsRefreshing(false);
+    }
+  };
 
-    fetchUsers();
+  useEffect(() => {
+    fetchUsersData();
   }, []);
 
   useEffect(() => {
@@ -425,6 +429,17 @@ export default function Page() {
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
+
+            <Button
+              variant="outline"
+              size="lg"
+              onClick={fetchUsersData}
+              disabled={isRefreshing}
+              className="h-11 px-4 border-gray-300 hover:bg-gray-50 gap-2"
+            >
+              <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+              Refresh
+            </Button>
 
             <Button
               variant="default"
