@@ -1,6 +1,5 @@
 import { NextAuthOptions, User } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
-import bcrypt from "bcryptjs";
 import prisma from "./prisma";
 import { UserRole } from "@prisma/client";
 import { PrismaAdapter } from "@next-auth/prisma-adapter";
@@ -63,6 +62,57 @@ export const nextauthOptions: NextAuthOptions = {
         session.user.role = token.role as UserRole;
       }
       return session;
+    },
+  },
+  events: {
+    async signIn({ user }) {
+      try {
+        const now = new Date();
+        const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+        // Calculate Monday of the current week (treat Sunday as last day of previous week)
+        const day = now.getDay(); // 0=Sun, 1=Mon, ... 6=Sat
+        const diffToMonday = day === 0 ? -6 : 1 - day;
+        const monday = new Date(now);
+        monday.setDate(now.getDate() + diffToMonday);
+        monday.setHours(0, 0, 0, 0);
+
+        await prisma.userActivity.create({
+          data: {
+            userId: (user as User).id,
+            loginAt: now,
+            date: startOfDay,
+            weekStart: monday,
+          },
+        });
+      } catch (err) {
+        console.error("Failed to record login activity", err);
+      }
+    },
+    async signOut({ token }) {
+      try {
+        const userId = (token as any)?.sub || (token as any)?.id;
+        if (!userId) return;
+
+        const latestActivity = await prisma.userActivity.findFirst({
+          where: { userId, logoutAt: null },
+          orderBy: { loginAt: "desc" },
+        });
+
+        if (latestActivity) {
+          const logoutAt = new Date();
+          const duration = Math.floor(
+            (logoutAt.getTime() - new Date(latestActivity.loginAt).getTime()) / 60000
+          );
+
+          await prisma.userActivity.update({
+            where: { id: latestActivity.id },
+            data: { logoutAt, duration },
+          });
+        }
+      } catch (err) {
+        console.error("Failed to record logout activity", err);
+      }
     },
   },
 };
