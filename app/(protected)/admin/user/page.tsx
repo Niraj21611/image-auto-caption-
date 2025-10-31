@@ -1,7 +1,15 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { MoreVertical, Plus, Eye, Pencil, Trash2, Key } from "lucide-react";
+import {
+  MoreVertical,
+  Plus,
+  Eye,
+  EyeOff,
+  Pencil,
+  Trash2,
+  Key,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -54,6 +62,9 @@ export default function Page() {
   const [isChangePasswordDialogOpen, setIsChangePasswordDialogOpen] =
     useState(false);
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showAddPassword, setShowAddPassword] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
 
   const [formData, setFormData] = useState({
     name: "",
@@ -68,7 +79,6 @@ export default function Page() {
         const res = await getAllUsers();
         if (res.success && res.data) {
           setUsers(res.data);
-          toast.success("Users loaded successfully!");
         } else {
           toast.error(res.error || "Failed to load users");
         }
@@ -100,6 +110,7 @@ export default function Page() {
         toast.success("User created successfully!");
         setUsers((prev) => [...prev, res.user]);
         setFormData({ name: "", email: "", password: "" });
+        setShowAddPassword(false);
         setIsAddDialogOpen(false);
       } else {
         toast.error(res.error || "Failed to create user");
@@ -179,6 +190,7 @@ export default function Page() {
         setIsChangePasswordDialogOpen(false);
         setSelectedUser(null);
         setNewPassword("");
+        setShowNewPassword(false);
       } else {
         toast.error(res.error || "Failed to change password");
       }
@@ -190,6 +202,7 @@ export default function Page() {
 
   const openViewDialog = (user: User) => {
     setSelectedUser(user);
+    setShowPassword(false);
     setIsViewDialogOpen(true);
   };
 
@@ -206,22 +219,46 @@ export default function Page() {
 
   if (isLoading) {
     return (
-      <div className="p-6 space-y-3">
-        {[...Array(5)].map((_, i) => (
-          <div key={i} className="flex items-center space-x-4">
-            <Skeleton className="h-10 w-10 rounded-full" />
-            <div className="space-y-2">
-              <Skeleton className="h-4 w-[250px]" />
-              <Skeleton className="h-4 w-[200px]" />
+      <div className="space-y-6">
+        <div className="sticky top-0 z-50 bg-white border-b border-border">
+          <div className="max-w-8xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div className="flex items-center justify-between h-16">
+              <div className="flex items-center gap-4">
+                <div>
+                  <h1 className="text-lg font-semibold text-foreground">
+                    User Management
+                  </h1>
+                  <p className="text-sm text-muted-foreground">
+                    Manage user and their profile
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <Button
+                  variant="default"
+                  size="lg"
+                  onClick={() => setIsAddDialogOpen(true)}
+                >
+                  <Plus />
+                  Create User
+                </Button>
+              </div>
             </div>
           </div>
-        ))}
+        </div>
+        <div className="p-6 space-y-3">
+          {[...Array(5)].map((_, i) => (
+            <div key={i} className="flex items-center space-x-4">
+              <Skeleton className="h-10 w-10 rounded-full" />
+              <div className="space-y-2">
+                <Skeleton className="h-4 w-[250px]" />
+                <Skeleton className="h-4 w-[200px]" />
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
     );
-  }
-
-  if (users.length === 0) {
-    return <p className="text-gray-500">No users found.</p>;
   }
 
   return (
@@ -244,6 +281,7 @@ export default function Page() {
                 variant="default"
                 size="lg"
                 onClick={() => setIsAddDialogOpen(true)}
+                className="bg-blue-600 hover:bg-blue-700 font-medium"
               >
                 <Plus />
                 Create User
@@ -253,96 +291,153 @@ export default function Page() {
         </div>
       </div>
 
-      {/* Users Table */}
-      <div className="p-6">
-        <div className="bg-white rounded-lg border border-neutral-200 shadow-sm p-4">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="font-semibold text-neutral-700">
-                  Name
-                </TableHead>
-                <TableHead className="font-semibold text-neutral-700">
-                  Email
-                </TableHead>
-                <TableHead className="text-right font-semibold text-neutral-700">
-                  Actions
-                </TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {users.map((user) => (
-                <TableRow key={user.id} className="hover:bg-neutral-50">
-                  <TableCell className="font-medium text-neutral-800">
-                    {user.name}
-                  </TableCell>
-                  <TableCell className="text-neutral-600">
-                    {user.email}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="hover:bg-neutral-100"
-                        >
-                          <MoreVertical className="w-4 h-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end" className="w-48">
-                        <DropdownMenuItem
-                          onClick={() => openViewDialog(user)}
-                          className="cursor-pointer"
-                        >
-                          <Eye className="w-4 h-4 mr-2" />
-                          View
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          onClick={() => openEditDialog(user)}
-                          className="cursor-pointer"
-                        >
-                          <Pencil className="w-4 h-4 mr-2" />
-                          Edit
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          onClick={() => openChangePasswordDialog(user)}
-                          className="cursor-pointer"
-                        >
-                          <Key className="w-4 h-4 mr-2" />
-                          Change Password
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          onClick={() => handleDeleteUser(user.id)}
-                          className="cursor-pointer text-red-600 focus:text-red-600"
-                        >
-                          <Trash2 className="w-4 h-4 mr-2" />
-                          Delete
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+      {users.length === 0 ? (
+        <div className="p-6">
+          <div className="bg-linear-to-br from-gray-50 to-gray-100 rounded-xl border-2 border-dashed border-gray-300 p-12">
+            <div className="flex flex-col items-center justify-center text-center space-y-4">
+              <div className="rounded-full bg-white p-6 shadow-md">
+                <svg
+                  className="w-16 h-16 text-gray-400"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                  xmlns="http://www.w3.org/2000/svg"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={1.5}
+                    d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"
+                  />
+                </svg>
+              </div>
+              <div className="space-y-2">
+                <h3 className="text-2xl font-bold text-gray-900">
+                  No Users Available
+                </h3>
+                <p className="text-gray-600 max-w-md mx-auto">
+                  Get started by creating your first user account. You can
+                  manage users, update their information, and control access
+                  from here.
+                </p>
+              </div>
+              <Button
+                variant="default"
+                size="lg"
+                onClick={() => setIsAddDialogOpen(true)}
+                className="mt-4 bg-blue-600 hover:bg-blue-700 font-medium"
+              >
+                <Plus className="w-5 h-5 mr-2" />
+                Create Your First User
+              </Button>
+            </div>
+          </div>
         </div>
-      </div>
+      ) : (
+        <div className="p-6">
+          <div className="bg-white rounded-lg border border-neutral-200 shadow-sm overflow-hidden p-4">
+            <Table>
+              <TableHeader>
+                <TableRow className=" border-b border-neutral-200 hover:bg-neutral-100">
+                  <TableHead className="font-semibold text-neutral-800 h-12">
+                    Name
+                  </TableHead>
+                  <TableHead className="font-semibold text-neutral-800 h-12">
+                    Email
+                  </TableHead>
+                  <TableHead className="text-right font-semibold text-neutral-800 h-12">
+                    Actions
+                  </TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {users.map((user) => (
+                  <TableRow key={user.id} className="hover:bg-neutral-50 border-b border-neutral-100 last:border-0">
+                    <TableCell className="font-medium text-neutral-900 py-4">
+                      {user.name}
+                    </TableCell>
+                    <TableCell className="text-neutral-600 py-4">
+                      {user.email}
+                    </TableCell>
+                    <TableCell className="text-right py-4">
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="hover:bg-neutral-100"
+                          >
+                            <MoreVertical className="w-4 h-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-48">
+                          <DropdownMenuItem
+                            onClick={() => openViewDialog(user)}
+                            className="cursor-pointer"
+                          >
+                            <Eye className="w-4 h-4 mr-2" />
+                            View
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={() => openEditDialog(user)}
+                            className="cursor-pointer"
+                          >
+                            <Pencil className="w-4 h-4 mr-2" />
+                            Edit
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={() => openChangePasswordDialog(user)}
+                            className="cursor-pointer"
+                          >
+                            <Key className="w-4 h-4 mr-2" />
+                            Change Password
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={() => handleDeleteUser(user.id)}
+                            className="cursor-pointer text-red-600 focus:text-red-600"
+                          >
+                            <Trash2 className="w-4 h-4 mr-2" />
+                            Delete
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        </div>
+      )}
 
       {/* Add User Dialog */}
-      <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
-        <DialogOverlay className="fixed inset-0 bg-black/50 backdrop-blur-sm" />
-
-        <DialogContent>
+      <Dialog
+        open={isAddDialogOpen}
+        onOpenChange={(open) => {
+          setIsAddDialogOpen(open);
+          if (!open) {
+            setShowAddPassword(false);
+            setFormData({ name: "", email: "", password: "" });
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-[500px]">
           <DialogHeader>
-            <DialogTitle>Add New User</DialogTitle>
-            <DialogDescription>
+            <DialogTitle className="text-xl font-bold text-gray-900">
+              Add New User
+            </DialogTitle>
+            <DialogDescription className="text-gray-600">
               Create a new user account with their details
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div className="space-y-2">
-              <Label htmlFor="add-name">Name</Label>
+              <Label
+                htmlFor="add-name"
+                className="text-sm font-semibold text-gray-900"
+              >
+                Name
+              </Label>
               <Input
                 id="add-name"
                 placeholder="Enter name"
@@ -350,10 +445,16 @@ export default function Page() {
                 onChange={(e) =>
                   setFormData({ ...formData, name: e.target.value })
                 }
+                className="border-gray-300 focus:border-blue-500 focus:ring-blue-500"
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="add-email">Email</Label>
+              <Label
+                htmlFor="add-email"
+                className="text-sm font-semibold text-gray-900"
+              >
+                Email
+              </Label>
               <Input
                 id="add-email"
                 type="email"
@@ -362,28 +463,56 @@ export default function Page() {
                 onChange={(e) =>
                   setFormData({ ...formData, email: e.target.value })
                 }
+                className="border-gray-300 focus:border-blue-500 focus:ring-blue-500"
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="add-password">Password</Label>
-              <Input
-                id="add-password"
-                type="password"
-                placeholder="Enter password"
-                value={formData.password}
-                onChange={(e) =>
-                  setFormData({ ...formData, password: e.target.value })
-                }
-              />
+              <Label
+                htmlFor="add-password"
+                className="text-sm font-semibold text-gray-900"
+              >
+                Password
+              </Label>
+              <div className="relative">
+                <Input
+                  id="add-password"
+                  type={showAddPassword ? "text" : "password"}
+                  placeholder="Enter password"
+                  value={formData.password}
+                  onChange={(e) =>
+                    setFormData({ ...formData, password: e.target.value })
+                  }
+                  className="border-gray-300 focus:border-blue-500 focus:ring-blue-500 pr-10"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowAddPassword(!showAddPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700 transition-colors"
+                >
+                  {showAddPassword ? (
+                    <EyeOff className="h-4 w-4" />
+                  ) : (
+                    <Eye className="h-4 w-4" />
+                  )}
+                </button>
+              </div>
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsAddDialogOpen(false)}>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setIsAddDialogOpen(false);
+                setShowAddPassword(false);
+                setFormData({ name: "", email: "", password: "" });
+              }}
+              className="font-medium"
+            >
               Cancel
             </Button>
             <Button
               onClick={handleAddUser}
-              className="bg-blue-600 hover:bg-blue-700"
+              className="bg-blue-600 hover:bg-blue-700 font-medium"
             >
               Add User
             </Button>
@@ -393,45 +522,86 @@ export default function Page() {
 
       {/* View User Dialog */}
       <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>
-        <DialogContent>
+        <DialogContent className="sm:max-w-[500px]">
           <DialogHeader>
-            <DialogTitle>User Details</DialogTitle>
-            <DialogDescription>View user information</DialogDescription>
+            <DialogTitle className="text-xl font-bold text-gray-900">
+              User Details
+            </DialogTitle>
+            <DialogDescription className="text-gray-600">
+              View user information
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div className="space-y-2">
-              <Label>Name</Label>
-              <Input value={selectedUser?.name || ""} disabled />
+              <Label className="text-sm font-bold text-gray-900">Name</Label>
+              <div className="rounded-md border border-gray-300 bg-gray-50 px-3 py-2">
+                <p className="text-sm font-semibold text-gray-900">
+                  {selectedUser?.name || ""}
+                </p>
+              </div>
             </div>
             <div className="space-y-2">
-              <Label>Email</Label>
-              <Input value={selectedUser?.email || ""} disabled />
+              <Label className="text-sm font-bold text-gray-900">Email</Label>
+              <div className="rounded-md border border-gray-300 bg-gray-50 px-3 py-2">
+                <p className="text-sm font-semibold text-gray-900">
+                  {selectedUser?.email || ""}
+                </p>
+              </div>
             </div>
             <div className="space-y-2">
-              <Label>Password</Label>
-              <Input
-                value={selectedUser?.password || ""}
-                type="password"
-                disabled
-              />
+              <Label className="text-sm font-bold text-gray-900">
+                Password
+              </Label>
+              <div className="relative">
+                <div className="rounded-md border border-gray-300 bg-gray-50 px-3 py-2 pr-10">
+                  <p className="text-sm font-semibold text-gray-900">
+                    {showPassword ? selectedUser?.password || "" : "••••••••"}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700 transition-colors"
+                >
+                  {showPassword ? (
+                    <EyeOff className="h-4 w-4" />
+                  ) : (
+                    <Eye className="h-4 w-4" />
+                  )}
+                </button>
+              </div>
             </div>
           </div>
           <DialogFooter>
-            <Button onClick={() => setIsViewDialogOpen(false)}>Close</Button>
+            <Button
+              onClick={() => setIsViewDialogOpen(false)}
+              className="font-medium"
+            >
+              Close
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
       {/* Edit User Dialog */}
       <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-        <DialogContent>
+        <DialogContent className="sm:max-w-[500px]">
           <DialogHeader>
-            <DialogTitle>Edit User</DialogTitle>
-            <DialogDescription>Update user information</DialogDescription>
+            <DialogTitle className="text-xl font-bold text-gray-900">
+              Edit User
+            </DialogTitle>
+            <DialogDescription className="text-gray-600">
+              Update user information
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div className="space-y-2">
-              <Label htmlFor="edit-name">Name</Label>
+              <Label
+                htmlFor="edit-name"
+                className="text-sm font-semibold text-gray-900"
+              >
+                Name
+              </Label>
               <Input
                 id="edit-name"
                 placeholder="Enter name"
@@ -439,10 +609,16 @@ export default function Page() {
                 onChange={(e) =>
                   setFormData({ ...formData, name: e.target.value })
                 }
+                className="border-gray-300 focus:border-blue-500 focus:ring-blue-500"
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="edit-email">Email</Label>
+              <Label
+                htmlFor="edit-email"
+                className="text-sm font-semibold text-gray-900"
+              >
+                Email
+              </Label>
               <Input
                 id="edit-email"
                 type="email"
@@ -451,6 +627,7 @@ export default function Page() {
                 onChange={(e) =>
                   setFormData({ ...formData, email: e.target.value })
                 }
+                className="border-gray-300 focus:border-blue-500 focus:ring-blue-500"
               />
             </div>
           </div>
@@ -458,12 +635,13 @@ export default function Page() {
             <Button
               variant="outline"
               onClick={() => setIsEditDialogOpen(false)}
+              className="font-medium"
             >
               Cancel
             </Button>
             <Button
               onClick={handleEditUser}
-              className="bg-blue-600 hover:bg-blue-700"
+              className="bg-blue-600 hover:bg-blue-700 font-medium"
             >
               Save Changes
             </Button>
@@ -474,37 +652,69 @@ export default function Page() {
       {/* Change Password Dialog */}
       <Dialog
         open={isChangePasswordDialogOpen}
-        onOpenChange={setIsChangePasswordDialogOpen}
+        onOpenChange={(open) => {
+          setIsChangePasswordDialogOpen(open);
+          if (!open) {
+            setShowNewPassword(false);
+            setNewPassword("");
+          }
+        }}
       >
-        <DialogContent>
+        <DialogContent className="sm:max-w-[500px]">
           <DialogHeader>
-            <DialogTitle>Change Password</DialogTitle>
-            <DialogDescription>
+            <DialogTitle className="text-xl font-bold text-gray-900">
+              Change Password
+            </DialogTitle>
+            <DialogDescription className="text-gray-600">
               Enter a new password for {selectedUser?.name}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div className="space-y-2">
-              <Label htmlFor="new-password">New Password</Label>
-              <Input
-                id="new-password"
-                type="password"
-                placeholder="Enter new password"
-                value={newPassword}
-                onChange={(e) => setNewPassword(e.target.value)}
-              />
+              <Label
+                htmlFor="new-password"
+                className="text-sm font-semibold text-gray-900"
+              >
+                New Password
+              </Label>
+              <div className="relative">
+                <Input
+                  id="new-password"
+                  type={showNewPassword ? "text" : "password"}
+                  placeholder="Enter new password"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  className="border-gray-300 focus:border-blue-500 focus:ring-blue-500 pr-10"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowNewPassword(!showNewPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700 transition-colors"
+                >
+                  {showNewPassword ? (
+                    <EyeOff className="h-4 w-4" />
+                  ) : (
+                    <Eye className="h-4 w-4" />
+                  )}
+                </button>
+              </div>
             </div>
           </div>
           <DialogFooter>
             <Button
               variant="outline"
-              onClick={() => setIsChangePasswordDialogOpen(false)}
+              onClick={() => {
+                setIsChangePasswordDialogOpen(false);
+                setShowNewPassword(false);
+                setNewPassword("");
+              }}
+              className="font-medium"
             >
               Cancel
             </Button>
             <Button
               onClick={handleChangePassword}
-              className="bg-blue-600 hover:bg-blue-700"
+              className="bg-blue-600 hover:bg-blue-700 font-medium"
             >
               Change Password
             </Button>
