@@ -126,7 +126,11 @@ export async function getUsersTodayDurations(userIds: string[]) {
       where: {
         userId: { in: userIds },
         loginAt: { lt: endOfDay },
-        OR: [{ logoutAt: null }, { logoutAt: { gt: startOfDay } }],
+        OR: [
+          { logoutAt: null },
+          { logoutAt: { gt: startOfDay } },
+          { logoutAt: { isSet: false } as any },
+        ],
       },
       select: {
         userId: true,
