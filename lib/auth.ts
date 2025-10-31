@@ -68,10 +68,13 @@ export const nextauthOptions: NextAuthOptions = {
     async signIn({ user }) {
       try {
         const now = new Date();
-        const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const startOfDay = new Date(
+          now.getFullYear(),
+          now.getMonth(),
+          now.getDate()
+        );
 
-        // Calculate Monday of the current week (treat Sunday as last day of previous week)
-        const day = now.getDay(); // 0=Sun, 1=Mon, ... 6=Sat
+        const day = now.getDay();
         const diffToMonday = day === 0 ? -6 : 1 - day;
         const monday = new Date(now);
         monday.setDate(now.getDate() + diffToMonday);
@@ -93,29 +96,18 @@ export const nextauthOptions: NextAuthOptions = {
       try {
         const userId = (token as any)?.sub || (token as any)?.id;
         if (!userId) return;
-
-        console.log("User ID on signOut:", userId);
-
-          // In MongoDB, an optional field may be missing (not set) instead of null.
-          // Use OR to match both null and not-set values with isSet: false.
-          const latestActivity = await prisma.userActivity.findFirst({
-            where: {
-              userId,
-              OR: [
-                { logoutAt: null },
-                // For MongoDB, match documents where the field is not set
-                // Casting to any to avoid type narrowing issues across Prisma versions
-                ({ logoutAt: { isSet: false } } as any),
-              ],
-            },
-            orderBy: [{ loginAt: "desc" }, { createdAt: "desc" }],
-          });
-        console.log("This is my " ,latestActivity);
-
+        const latestActivity = await prisma.userActivity.findFirst({
+          where: {
+            userId,
+            OR: [{ logoutAt: null }, { logoutAt: { isSet: false } } as any],
+          },
+          orderBy: [{ loginAt: "desc" }, { createdAt: "desc" }],
+        });
         if (latestActivity) {
           const logoutAt = new Date();
           const duration = Math.floor(
-            (logoutAt.getTime() - new Date(latestActivity.loginAt).getTime()) / 60000
+            (logoutAt.getTime() - new Date(latestActivity.loginAt).getTime()) /
+              60000
           );
 
           await prisma.userActivity.update({

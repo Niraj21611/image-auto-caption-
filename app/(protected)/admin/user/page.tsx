@@ -116,40 +116,6 @@ export default function Page() {
     fetchUsers();
   }, []);
 
-  // Periodic refresh to reflect ongoing sessions in near real-time
-  useEffect(() => {
-    if (!users.length) return;
-
-    let active = true;
-    const ids = users.map((u) => u.id);
-
-    const refresh = async () => {
-      const d = await getUsersTodayDurations(ids);
-      if (active && d.success && d.data) {
-        const mapped: Record<string, string> = {};
-        for (const [id, val] of Object.entries(d.data)) {
-          mapped[id] = (val as any).formatted;
-        }
-        setTodayDurations(mapped);
-      }
-    };
-
-    // initial and interval
-    refresh();
-    const handle = setInterval(refresh, 30_000);
-
-    const onVisibility = () => {
-      if (document.visibilityState === "visible") refresh();
-    };
-    document.addEventListener("visibilitychange", onVisibility);
-
-    return () => {
-      active = false;
-      clearInterval(handle);
-      document.removeEventListener("visibilitychange", onVisibility);
-    };
-  }, [users]);
-
   const handleAddUser = async () => {
     try {
       if (!formData.name || !formData.email || !formData.password) {
