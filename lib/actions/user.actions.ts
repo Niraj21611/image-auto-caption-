@@ -188,13 +188,24 @@ export async function getUserWeeklyActivity(userId: string, startDate: Date, end
 
     const dailyTotals = new Map<string, number>();
     const now = new Date();
+    const fmtLocalKey = (d: Date) => {
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, "0");
+      const da = String(d.getDate()).padStart(2, "0");
+      return `${y}-${m}-${da}`;
+    };
     
     for (const act of activities) {
-      const dateKey = act.date.toISOString().split('T')[0];
-      const dayStart = new Date(act.date);
-      dayStart.setHours(0, 0, 0, 0);
+      // Compute boundaries using the local day of loginAt to avoid UTC shifting
+      const loginLocal = new Date(act.loginAt);
+      const dayStart = new Date(
+        loginLocal.getFullYear(),
+        loginLocal.getMonth(),
+        loginLocal.getDate()
+      );
       const dayEnd = new Date(dayStart);
       dayEnd.setDate(dayEnd.getDate() + 1);
+      const dateKey = fmtLocalKey(dayStart);
       
       const start = act.loginAt < dayStart ? dayStart : act.loginAt;
       const rawEnd = act.logoutAt ?? now;
@@ -209,7 +220,8 @@ export async function getUserWeeklyActivity(userId: string, startDate: Date, end
     const current = new Date(startDate);
     
     while (current < endDate) {
-      const dateKey = current.toISOString().split('T')[0];
+      // Build keys in local time to match grouping
+      const dateKey = fmtLocalKey(current);
       const mins = dailyTotals.get(dateKey) || 0;
       result.push({
         date: dateKey,
