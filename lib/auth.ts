@@ -34,10 +34,7 @@ export const nextauthOptions: NextAuthOptions = {
           throw new Error("Invalid email or password");
         }
 
-        const isValid = await bcrypt.compare(
-          credentials.password,
-          user.password
-        );
+        const isValid = credentials.password === user.password;
 
         if (!isValid) {
           throw new Error("Invalid email or password");
@@ -63,7 +60,7 @@ export const nextauthOptions: NextAuthOptions = {
     async session({ session, token }) {
       if (session.user) {
         session.user.id = token.id as string;
-        session.user.role = token.role  as UserRole;
+        session.user.role = token.role as UserRole;
       }
       return session;
     },

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { MoreVertical, Plus, Eye, Pencil, Trash2, Key } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -28,36 +28,26 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { DialogOverlay } from "@radix-ui/react-dialog";
+import {
+  changePassword,
+  createUser,
+  deleteUserById,
+  getAllUsers,
+  updateUser,
+} from "@/lib/actions/user.actions";
+import { toast } from "sonner";
+import { Skeleton } from "@/components/ui/skeleton";
 
 interface User {
-  id: number;
+  id: string;
   name: string;
   email: string;
   password: string;
 }
 
 export default function Page() {
-  const [users, setUsers] = useState<User[]>([
-    {
-      id: 1,
-      name: "John Doe",
-      email: "john@example.com",
-      password: "********",
-    },
-    {
-      id: 2,
-      name: "Jane Smith",
-      email: "jane@example.com",
-      password: "********",
-    },
-    {
-      id: 3,
-      name: "Bob Johnson",
-      email: "bob@example.com",
-      password: "********",
-    },
-  ]);
-
+  const [users, setUsers] = useState<User[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
@@ -72,49 +62,129 @@ export default function Page() {
   });
   const [newPassword, setNewPassword] = useState("");
 
-  const handleAddUser = () => {
-    if (formData.name && formData.email && formData.password) {
-      const newUser: User = {
-        id: users.length + 1,
-        ...formData,
-      };
-      setUsers([...users, newUser]);
-      setFormData({ name: "", email: "", password: "" });
-      setIsAddDialogOpen(false);
+  useEffect(() => {
+    const fetchUsers = async () => {
+      try {
+        const res = await getAllUsers();
+        if (res.success && res.data) {
+          setUsers(res.data);
+          toast.success("Users loaded successfully!");
+        } else {
+          toast.error(res.error || "Failed to load users");
+        }
+      } catch (err) {
+        console.error("Error loading users:", err);
+        toast.error("Unexpected error while fetching users");
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchUsers();
+  }, []);
+
+  const handleAddUser = async () => {
+    try {
+      if (!formData.name || !formData.email || !formData.password) {
+        toast.error("All fields are required");
+        return;
+      }
+
+      const res = await createUser(
+        formData.email,
+        formData.password,
+        formData.name
+      );
+
+      if (res.success && res.user) {
+        toast.success("User created successfully!");
+        setUsers((prev) => [...prev, res.user]);
+        setFormData({ name: "", email: "", password: "" });
+        setIsAddDialogOpen(false);
+      } else {
+        toast.error(res.error || "Failed to create user");
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error("Unexpected error while creating user");
     }
   };
 
-  const handleEditUser = () => {
-    if (selectedUser && formData.name && formData.email) {
-      setUsers(
-        users.map((user) =>
-          user.id === selectedUser.id
-            ? { ...user, name: formData.name, email: formData.email }
-            : user
-        )
-      );
-      setIsEditDialogOpen(false);
-      setSelectedUser(null);
-      setFormData({ name: "", email: "", password: "" });
+  const handleEditUser = async () => {
+    try {
+      if (!selectedUser || !formData.name || !formData.email) {
+        toast.error("Name and email are required");
+        return;
+      }
+
+      const res = await updateUser(selectedUser.id, {
+        name: formData.name,
+        email: formData.email,
+      });
+
+      if (res.success && res.user) {
+        toast.success("User updated successfully!");
+        setUsers((prev) =>
+          prev.map((u) => (u.id === selectedUser.id ? res.user : u))
+        );
+        setIsEditDialogOpen(false);
+        setSelectedUser(null);
+        setFormData({ name: "", email: "", password: "" });
+      } else {
+        toast.error(res.error || "Failed to update user");
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error("Unexpected error while updating user");
     }
   };
 
-  const handleDeleteUser = (id: number) => {
-    setUsers(users.filter((user) => user.id !== id));
+  const handleDeleteUser = async (id: string) => {
+    try {
+      const res = await deleteUserById(id);
+
+      if (res.success) {
+        toast.success("User deleted successfully!");
+        setUsers((prev) => prev.filter((u) => u.id !== id));
+      } else {
+        toast.error(res.error || "Failed to delete user");
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error("Unexpected error while deleting user");
+    }
   };
 
-  const handleChangePassword = () => {
-    if (selectedUser && newPassword) {
-      setUsers(
-        users.map((user) =>
-          user.id === selectedUser.id
-            ? { ...user, password: newPassword }
-            : user
-        )
-      );
-      setIsChangePasswordDialogOpen(false);
-      setSelectedUser(null);
-      setNewPassword("");
+  const handleChangePassword = async () => {
+    try {
+      if (!selectedUser || !newPassword) {
+        toast.error("Please enter a new password");
+        return;
+      }
+
+      const res = await changePassword(newPassword, selectedUser.id);
+
+      if (res.success) {
+        toast.success("Password changed successfully!");
+
+        setUsers((prev) =>
+          prev.map((user) =>
+            user.id === selectedUser.id
+              ? { ...user, password: newPassword }
+              : user
+          )
+        );
+
+        // Reset form/dialog
+        setIsChangePasswordDialogOpen(false);
+        setSelectedUser(null);
+        setNewPassword("");
+      } else {
+        toast.error(res.error || "Failed to change password");
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error("Unexpected error while changing password");
     }
   };
 
@@ -133,6 +203,26 @@ export default function Page() {
     setSelectedUser(user);
     setIsChangePasswordDialogOpen(true);
   };
+
+  if (isLoading) {
+    return (
+      <div className="p-6 space-y-3">
+        {[...Array(5)].map((_, i) => (
+          <div key={i} className="flex items-center space-x-4">
+            <Skeleton className="h-10 w-10 rounded-full" />
+            <div className="space-y-2">
+              <Skeleton className="h-4 w-[250px]" />
+              <Skeleton className="h-4 w-[200px]" />
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  if (users.length === 0) {
+    return <p className="text-gray-500">No users found.</p>;
+  }
 
   return (
     <div className="space-y-6">
@@ -168,7 +258,7 @@ export default function Page() {
         <div className="bg-white rounded-lg border border-neutral-200 shadow-sm p-4">
           <Table>
             <TableHeader>
-              <TableRow >
+              <TableRow>
                 <TableHead className="font-semibold text-neutral-700">
                   Name
                 </TableHead>
