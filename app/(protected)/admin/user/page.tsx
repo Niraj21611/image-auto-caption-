@@ -42,6 +42,7 @@ import {
   createUser,
   deleteUserById,
   getAllUsers,
+  getUsersTodayDurations,
   updateUser,
 } from "@/lib/actions/user.actions";
 import { toast } from "sonner";
@@ -67,6 +68,7 @@ export default function Page() {
   const [showAddPassword, setShowAddPassword] = useState(false);
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [todayDurations, setTodayDurations] = useState<Record<string, string>>({});
 
   const [formData, setFormData] = useState({
     name: "",
@@ -90,6 +92,16 @@ export default function Page() {
         const res = await getAllUsers();
         if (res.success && res.data) {
           setUsers(res.data);
+          const ids = res.data.map((u: User) => u.id);
+          const d = await getUsersTodayDurations(ids);
+          console.log(d)
+          if (d.success && d.data) {
+            const mapped: Record<string, string> = {};
+            for (const [id, val] of Object.entries(d.data)) {
+              mapped[id] = (val as any).formatted;
+            }
+            setTodayDurations(mapped);
+          }
         } else {
           toast.error(res.error || "Failed to load users");
         }
@@ -358,6 +370,9 @@ export default function Page() {
                   <TableHead className="font-semibold text-neutral-800 h-12">
                     Email
                   </TableHead>
+                  <TableHead className="font-semibold text-neutral-800 h-12">
+                    Total Logged In Time (Today)
+                  </TableHead>
                   <TableHead className="text-right font-semibold text-neutral-800 h-12">
                     Actions
                   </TableHead>
@@ -366,7 +381,7 @@ export default function Page() {
               <TableBody>
                 {filteredUsers.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={3} className="text-center py-12">
+                    <TableCell colSpan={4} className="text-center py-12">
                       <div className="flex flex-col items-center gap-2">
                         <Search className="h-10 w-10 text-gray-300" />
                         <p className="text-gray-500 font-medium">No users found</p>
@@ -387,6 +402,9 @@ export default function Page() {
                       </TableCell>
                       <TableCell className="text-neutral-600 py-4">
                         {user.email}
+                      </TableCell>
+                      <TableCell className="text-neutral-700 py-4">
+                        {todayDurations[user.id] ?? "-"}
                       </TableCell>
                       <TableCell className="text-right py-4">
                       <DropdownMenu>

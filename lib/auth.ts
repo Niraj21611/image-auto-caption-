@@ -94,10 +94,23 @@ export const nextauthOptions: NextAuthOptions = {
         const userId = (token as any)?.sub || (token as any)?.id;
         if (!userId) return;
 
-        const latestActivity = await prisma.userActivity.findFirst({
-          where: { userId, logoutAt: null },
-          orderBy: { loginAt: "desc" },
-        });
+        console.log("User ID on signOut:", userId);
+
+          // In MongoDB, an optional field may be missing (not set) instead of null.
+          // Use OR to match both null and not-set values with isSet: false.
+          const latestActivity = await prisma.userActivity.findFirst({
+            where: {
+              userId,
+              OR: [
+                { logoutAt: null },
+                // For MongoDB, match documents where the field is not set
+                // Casting to any to avoid type narrowing issues across Prisma versions
+                ({ logoutAt: { isSet: false } } as any),
+              ],
+            },
+            orderBy: [{ loginAt: "desc" }, { createdAt: "desc" }],
+          });
+        console.log("This is my " ,latestActivity);
 
         if (latestActivity) {
           const logoutAt = new Date();
