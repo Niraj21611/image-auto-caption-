@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import  { useEffect, useState } from "react";
 import {
   MoreVertical,
   Plus,
@@ -10,6 +10,10 @@ import {
   Trash2,
   Key,
   Search,
+  Copy,
+  Check,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -43,6 +47,7 @@ import {
   deleteUserById,
   getAllUsers,
   getUsersTodayDurations,
+  getUserWeeklyActivity,
   updateUser,
 } from "@/lib/actions/user.actions";
 import { toast } from "sonner";
@@ -53,6 +58,12 @@ interface User {
   name: string;
   email: string;
   password: string;
+}
+
+interface UserOnlineStatus {
+  minutes: number;
+  formatted: string;
+  isOnline: boolean;
 }
 
 export default function Page() {
@@ -68,7 +79,16 @@ export default function Page() {
   const [showAddPassword, setShowAddPassword] = useState(false);
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-  const [todayDurations, setTodayDurations] = useState<Record<string, string>>({});
+  const [todayDurations, setTodayDurations] = useState<Record<string, UserOnlineStatus>>({});
+  const [passwordCopied, setPasswordCopied] = useState(false);
+  const [sortBy, setSortBy] = useState<"most-active" | "active-first" | "none">("none");
+  
+  const [weeklyData, setWeeklyData] = useState<{
+    daily: Array<{ date: string; minutes: number; formatted: string }>;
+    totalMinutes: number;
+    totalFormatted: string;
+  } | null>(null);
+  const [weekOffset, setWeekOffset] = useState(0); 
 
   const [formData, setFormData] = useState({
     name: "",
@@ -79,12 +99,25 @@ export default function Page() {
 
   const sanitizePasswordInput = (value: string) => value.replace(/\s/g, "");
 
-  // Filter users based on search query
-  const filteredUsers = users.filter(
-    (user) =>
-      user.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      user.email.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredUsers = users
+    .filter(
+      (user) =>
+        user.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        user.email.toLowerCase().includes(searchQuery.toLowerCase())
+    )
+    .sort((a, b) => {
+      if (sortBy === "most-active") {
+        const aMinutes = todayDurations[a.id]?.minutes || 0;
+        const bMinutes = todayDurations[b.id]?.minutes || 0;
+        return bMinutes - aMinutes;
+      } else if (sortBy === "active-first") {
+        const aOnline = todayDurations[a.id]?.isOnline || false;
+        const bOnline = todayDurations[b.id]?.isOnline || false;
+        if (aOnline === bOnline) return 0;
+        return aOnline ? -1 : 1;
+      }
+      return 0;
+    });
 
   useEffect(() => {
     const fetchUsers = async () => {
@@ -94,13 +127,8 @@ export default function Page() {
           setUsers(res.data);
           const ids = res.data.map((u: User) => u.id);
           const d = await getUsersTodayDurations(ids);
-          console.log(d)
           if (d.success && d.data) {
-            const mapped: Record<string, string> = {};
-            for (const [id, val] of Object.entries(d.data)) {
-              mapped[id] = (val as any).formatted;
-            }
-            setTodayDurations(mapped);
+            setTodayDurations(d.data as any);
           }
         } else {
           toast.error(res.error || "Failed to load users");
@@ -115,6 +143,59 @@ export default function Page() {
 
     fetchUsers();
   }, []);
+
+  useEffect(() => {
+    if (isViewDialogOpen && selectedUser) {
+      fetchWeeklyData();
+    }
+  }, [isViewDialogOpen, selectedUser, weekOffset]);
+
+  const fetchWeeklyData = async () => {
+    if (!selectedUser) return;
+
+    const now = new Date();
+    const dayOfWeek = now.getDay();
+    const mondayOffset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+    
+    const weekStart = new Date(now);
+    weekStart.setDate(now.getDate() + mondayOffset + (weekOffset * 7));
+    weekStart.setHours(0, 0, 0, 0);
+    
+    const weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekStart.getDate() + 7);
+
+    const res = await getUserWeeklyActivity(selectedUser.id, weekStart, weekEnd);
+    if (res.success && res.data) {
+      setWeeklyData(res.data);
+    }
+  };
+
+  const getWeekRangeText = () => {
+    const now = new Date();
+    const dayOfWeek = now.getDay();
+    const mondayOffset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+    
+    const weekStart = new Date(now);
+    weekStart.setDate(now.getDate() + mondayOffset + (weekOffset * 7));
+    
+    const weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekStart.getDate() + 6);
+
+    const formatDate = (d: Date) => {
+      return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    };
+
+    return `${formatDate(weekStart)} - ${formatDate(weekEnd)}`;
+  };
+
+  const copyPassword = () => {
+    if (selectedUser?.password) {
+      navigator.clipboard.writeText(selectedUser.password);
+      setPasswordCopied(true);
+      toast.success("Password copied to clipboard");
+      setTimeout(() => setPasswordCopied(false), 2000);
+    }
+  };
 
   const handleAddUser = async () => {
     try {
@@ -209,7 +290,6 @@ export default function Page() {
           )
         );
 
-        // Reset form/dialog
         setIsChangePasswordDialogOpen(false);
         setSelectedUser(null);
         setNewPassword("");
@@ -226,6 +306,8 @@ export default function Page() {
   const openViewDialog = (user: User) => {
     setSelectedUser(user);
     setShowPassword(false);
+    setPasswordCopied(false);
+    setWeekOffset(0);
     setIsViewDialogOpen(true);
   };
 
@@ -289,10 +371,8 @@ export default function Page() {
         </div>
       </div>
 
-      {/* Search and Create User Section */}
       <div className="px-6">
         <div className="flex items-center justify-between gap-4">
-          {/* Search Bar */}
           <div className="relative w-96">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
             <Input
@@ -303,16 +383,59 @@ export default function Page() {
               className="pl-10 h-11 bg-white border-gray-300 focus:border-blue-500 focus:ring-blue-500 rounded-lg shadow-sm"
             />
           </div>
-          {/* Create User Button */}
-          <Button
-            variant="default"
-            size="lg"
-            onClick={() => setIsAddDialogOpen(true)}
-            className="bg-blue-600 hover:bg-blue-700 font-medium h-11 px-6 shadow-sm"
-          >
-            <Plus className="h-5 w-5 mr-2" />
-            Create User
-          </Button>
+          
+          <div className="flex items-center gap-3">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="lg"
+                  className="h-11 px-4 border-gray-300 hover:bg-gray-50 gap-2"
+                >
+                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4h13M3 8h9m-9 4h6m4 0l4-4m0 0l4 4m-4-4v12" />
+                  </svg>
+                  {sortBy === "most-active" ? "Most Active" : sortBy === "active-first" ? "Active First" : "Sort By"}
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-48">
+                <DropdownMenuItem
+                  onClick={() => setSortBy("none")}
+                  className="cursor-pointer"
+                >
+                  <span className={sortBy === "none" ? "font-semibold" : ""}>
+                    Default Order
+                  </span>
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => setSortBy("most-active")}
+                  className="cursor-pointer"
+                >
+                  <span className={sortBy === "most-active" ? "font-semibold" : ""}>
+                    Most Logged In Time
+                  </span>
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => setSortBy("active-first")}
+                  className="cursor-pointer"
+                >
+                  <span className={sortBy === "active-first" ? "font-semibold" : ""}>
+                    Active Users First
+                  </span>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+
+            <Button
+              variant="default"
+              size="lg"
+              onClick={() => setIsAddDialogOpen(true)}
+              className="bg-blue-600 hover:bg-blue-700 font-medium h-11 px-6 shadow-sm"
+            >
+              <Plus className="h-5 w-5 mr-2" />
+              Create User
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -395,18 +518,41 @@ export default function Page() {
                   filteredUsers.map((user) => (
                     <TableRow
                       key={user.id}
-                      className="hover:bg-neutral-50 border-b border-neutral-100 last:border-0"
+                      className="hover:bg-neutral-50 border-b border-neutral-100 last:border-0 cursor-pointer"
+                      onClick={() => openViewDialog(user)}
                     >
                       <TableCell className="font-medium text-neutral-900 py-4">
-                        {user.name}
+                        <div className="flex items-center gap-2">
+                          {user.name}
+                        </div>
                       </TableCell>
                       <TableCell className="text-neutral-600 py-4">
                         {user.email}
                       </TableCell>
                       <TableCell className="text-neutral-700 py-4">
-                        {todayDurations[user.id] ?? "-"}
+                        <div className="flex items-center gap-2">
+                          {todayDurations[user.id]?.formatted ? (
+                            <>
+                              <div className={`w-2 h-2 rounded-full ${todayDurations[user.id]?.isOnline ? 'bg-green-500' : 'bg-red-500'}`} />
+                              <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${
+                                todayDurations[user.id]?.isOnline 
+                                  ? 'bg-green-100 text-green-800 border border-green-200' 
+                                  : 'bg-gray-100 text-gray-700 border border-gray-200'
+                              }`}>
+                                {todayDurations[user.id]?.formatted}
+                              </span>
+                              {todayDurations[user.id]?.isOnline && (
+                                <span className="text-[10px] font-semibold text-green-600 uppercase tracking-wide">
+                                  Active
+                                </span>
+                              )}
+                            </>
+                          ) : (
+                            <span className="text-gray-400">-</span>
+                          )}
+                        </div>
                       </TableCell>
-                      <TableCell className="text-right py-4">
+                      <TableCell className="text-right py-4" onClick={(e) => e.stopPropagation()}>
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                           <Button
@@ -458,7 +604,6 @@ export default function Page() {
         </div>
       )}
 
-      {/* Add User Dialog */}
       <Dialog
         open={isAddDialogOpen}
         onOpenChange={(open) => {
@@ -571,62 +716,146 @@ export default function Page() {
         </DialogContent>
       </Dialog>
 
-      {/* View User Dialog */}
       <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>
-        <DialogContent className="sm:max-w-[500px]">
-          <DialogHeader>
-            <DialogTitle className="text-xl font-bold text-gray-900">
-              User Details
-            </DialogTitle>
-            <DialogDescription className="text-gray-600">
-              View user information
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label className="text-sm font-bold text-gray-900">Name</Label>
-              <div className="rounded-md border border-gray-300 bg-gray-50 px-3 py-2">
-                <p className="text-sm font-semibold text-gray-900">
-                  {selectedUser?.name || ""}
-                </p>
+        <DialogContent className="sm:max-w-5xl max-h-[90vh] overflow-y-auto">
+          <div className="border-b border-gray-200 pb-4">
+            <div className="flex items-start justify-between">
+              <div className="flex items-center gap-3">
+                <div className={`w-3 h-3 rounded-full ${todayDurations[selectedUser?.id || '']?.isOnline ? 'bg-green-500' : 'bg-gray-400'}`} />
+                <div>
+                  <h2 className="text-2xl font-bold text-gray-900">{selectedUser?.name}</h2>
+                  <p className="text-sm text-gray-600 mt-1">{selectedUser?.email}</p>
+                </div>
+              </div>
+              <div className="flex gap-2 mr-8">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="gap-2"
+                >
+                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  {showPassword ? "Hide" : "View"} Password
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={copyPassword}
+                  className="gap-2"
+                >
+                  {passwordCopied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                  {passwordCopied ? "Copied!" : "Copy Password"}
+                </Button>
               </div>
             </div>
-            <div className="space-y-2">
-              <Label className="text-sm font-bold text-gray-900">Email</Label>
-              <div className="rounded-md border border-gray-300 bg-gray-50 px-3 py-2">
-                <p className="text-sm font-semibold text-gray-900">
-                  {selectedUser?.email || ""}
-                </p>
+            {showPassword && (
+              <div className="mt-3 p-3 bg-gray-50 rounded-lg border border-gray-200">
+                <p className="text-sm font-mono text-gray-900">{selectedUser?.password}</p>
+              </div>
+            )}
+          </div>
+
+          <div className="space-y-4 pt-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">Login Activity</h3>
+                <p className="text-sm text-gray-600">Weekly time tracking</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setWeekOffset(weekOffset - 1)}
+                  className="gap-1"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                  Previous
+                </Button>
+                <div className="px-4 py-2 bg-blue-50 text-blue-700 rounded-md text-sm font-medium min-w-60 text-center">
+                  {getWeekRangeText()}
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setWeekOffset(weekOffset + 1)}
+                  disabled={weekOffset >= 0}
+                  className="gap-1"
+                >
+                  Next
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
               </div>
             </div>
-            <div className="space-y-2">
-              <Label className="text-sm font-bold text-gray-900">
-                Password
-              </Label>
-              <div className="relative">
-                <div className="rounded-md border border-gray-300 bg-gray-50 px-3 py-2 pr-10">
-                  <p className="text-sm font-semibold text-gray-900">
-                    {showPassword ? selectedUser?.password || "" : "••••••••"}
+
+            <div className="bg-linear-to-br from-blue-50 to-indigo-50 rounded-xl p-6 border border-blue-200">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-blue-900">Total Login Time (This Week)</p>
+                  <p className="text-3xl font-bold text-blue-700 mt-1">
+                    {weeklyData?.totalFormatted || "0 mins"}
                   </p>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700 transition-colors"
-                >
-                  {showPassword ? (
-                    <EyeOff className="h-4 w-4" />
-                  ) : (
-                    <Eye className="h-4 w-4" />
-                  )}
-                </button>
+                <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center">
+                  <svg className="w-8 h-8 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                </div>
               </div>
             </div>
+
+            <div className="grid grid-cols-7 gap-2">
+              {weeklyData?.daily.map((day, idx) => {
+                const date = new Date(day.date);
+                const dayName = date.toLocaleDateString('en-US', { weekday: 'short' });
+                const dayNum = date.getDate();
+                const isToday = new Date().toDateString() === date.toDateString();
+                
+                return (
+                  <div
+                    key={day.date}
+                    className={`p-4 rounded-lg border-2 ${
+                      isToday
+                        ? 'bg-blue-50 border-blue-500'
+                        : day.minutes > 0
+                        ? 'bg-green-50 border-green-200'
+                        : 'bg-gray-50 border-gray-200'
+                    }`}
+                  >
+                    <div className="text-center">
+                      <p className={`text-xs font-semibold uppercase ${
+                        isToday ? 'text-blue-700' : 'text-gray-600'
+                      }`}>
+                        {dayName}
+                      </p>
+                      <p className={`text-lg font-bold mt-1 ${
+                        isToday ? 'text-blue-900' : 'text-gray-900'
+                      }`}>
+                        {dayNum}
+                      </p>
+                      <div className={`mt-2 pt-2 border-t ${
+                        isToday ? 'border-blue-200' : 'border-gray-200'
+                      }`}>
+                        <p className={`text-xs font-medium ${
+                          day.minutes > 0
+                            ? isToday
+                              ? 'text-blue-700'
+                              : 'text-green-700'
+                            : 'text-gray-500'
+                        }`}>
+                          {day.formatted}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
-          <DialogFooter>
+
+          <DialogFooter className="border-t border-gray-200 pt-4 mt-4">
             <Button
               onClick={() => setIsViewDialogOpen(false)}
-              className="font-medium"
+              className="bg-blue-600 hover:bg-blue-700"
             >
               Close
             </Button>
@@ -634,7 +863,6 @@ export default function Page() {
         </DialogContent>
       </Dialog>
 
-      {/* Edit User Dialog */}
       <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
         <DialogContent className="sm:max-w-[500px]">
           <DialogHeader>
@@ -700,7 +928,6 @@ export default function Page() {
         </DialogContent>
       </Dialog>
 
-      {/* Change Password Dialog */}
       <Dialog
         open={isChangePasswordDialogOpen}
         onOpenChange={(open) => {
