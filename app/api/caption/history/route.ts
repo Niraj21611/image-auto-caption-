@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { getHistory } from "@/lib/actions/caption.actions";
 
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
 export async function GET() {
   try {
     const res = await getHistory(50);

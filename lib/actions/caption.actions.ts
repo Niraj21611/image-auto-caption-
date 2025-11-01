@@ -15,6 +15,7 @@ interface JobState {
   images: string[];
   total: number;
   processed: number;
+  failed: number;
   status: JobStatus;
   error?: string;
   startedAt?: number;
@@ -72,6 +73,7 @@ export async function analyzeDirectory(dirPath: string) {
       images,
       total: images.length,
       processed: 0,
+      failed: 0,
       status: "idle",
     };
     jobs.set(id, job);
@@ -112,6 +114,7 @@ export async function startProcessing(
           images,
           total: images.length,
           processed: 0,
+          failed: 0,
           status: "idle",
         };
         jobs.set(jobId, job);
@@ -136,7 +139,7 @@ export async function startProcessing(
 
   (async () => {
     try {
-  // Build worker pool and process in parallel batches
+      // Build worker pool and process in parallel batches
   const cpu = Math.max(1, (os.cpus()?.length || 2) - 1);
   const envConcurrency = Number.parseInt(process.env.CAPTION_CONCURRENCY || "", 10);
   const requested = typeof concurrency === "number" && !Number.isNaN(concurrency) ? concurrency : (isNaN(envConcurrency) ? 1 : envConcurrency);
@@ -147,13 +150,25 @@ export async function startProcessing(
 
   const workerPath = path.resolve(process.cwd(), "lib/workers/captionWorker.mjs");
 
+      // Seed processed count with already-captioned images and skip them
+      const already = await prisma.imageCaption.findMany({
+        where: { filePath: { in: job.images } },
+        select: { filePath: true },
+      });
+      const doneSet = new Set(already.map((a) => a.filePath));
+      job.processed = doneSet.size;
+      try {
+        await prisma.imageJob.update({ where: { id: jobId }, data: { processed: job.processed } });
+      } catch {}
+      const remainingImages = job.images.filter((f) => !doneSet.has(f));
+
   const configuredBatch = Number.parseInt(process.env.CAPTION_BATCH_SIZE || "", 10);
   // Request override (batchSize param) has highest priority
   const requestedBatch = typeof batchSize === "number" && !Number.isNaN(batchSize) ? batchSize : undefined;
   const effBatchSize = Math.max(1, (requestedBatch ?? (isNaN(configuredBatch) ? 5 : configuredBatch)));
       const batches: string[][] = [];
-      for (let i = 0; i < job.images.length; i += effBatchSize) {
-        batches.push(job.images.slice(i, i + effBatchSize));
+      for (let i = 0; i < remainingImages.length; i += effBatchSize) {
+        batches.push(remainingImages.slice(i, i + effBatchSize));
       }
 
       // Track if we should stop (check DB status periodically)
@@ -180,11 +195,27 @@ export async function startProcessing(
 
         try {
           const captions = await new Promise<string[]>((resolve, reject) => {
-            const w = new Worker(workerPath);
+            let w: Worker;
+            try {
+              const workerURL = new URL("../workers/captionWorker.mjs", import.meta.url);
+              // Cast to any to allow 'type' as TS WorkerOptions may miss it in our types
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              w = new Worker(workerURL as unknown as string, { ...( { type: "module" } as any) });
+            } catch  {
+              try {
+                // Fallback to filesystem path; ensure ESM type
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                w = new Worker(workerPath as unknown as string, { ...( { type: "module" } as any) });
+              } catch (err) {
+                return reject(err);
+              }
+            }
+            const timeoutMs = Number.parseInt(process.env.CAPTION_WORKER_TIMEOUT_MS || "", 10);
+            const ms = Math.max(30000, isNaN(timeoutMs) ? 180000 : timeoutMs);
             const to = setTimeout(() => {
               w.terminate();
               reject(new Error("Worker timed out"));
-            }, 60000);
+            }, ms);
             w.once("message", (msg: unknown) => {
               const m = msg as { ok?: boolean; captions?: unknown; error?: unknown };
               clearTimeout(to);
@@ -208,6 +239,12 @@ export async function startProcessing(
             const filePath = batch[k];
             const preCaption = captions[k] || "";
             try {
+              // Skip if already exists (race-safe)
+              const existing = await prisma.imageCaption.findUnique({ where: { filePath }, select: { id: true } });
+              if (existing) {
+                // Count it as processed baseline; no DB upsert needed
+                continue;
+              }
               await prisma.imageCaption.upsert({
                 where: { filePath },
                 create: {
@@ -230,6 +267,10 @@ export async function startProcessing(
               } catch {}
             } catch (err) {
               console.error("DB upsert error for", filePath, err);
+              job!.failed += 1;
+              try {
+                await prisma.imageJob.update({ where: { id: jobId }, data: { failed: job!.failed } });
+              } catch {}
             }
           }
         } catch (err) {
@@ -241,6 +282,12 @@ export async function startProcessing(
             await new Promise((r) => setTimeout(r, delay));
             // re-enqueue this batch to try again later
             batches.push(batch);
+          } else {
+            // Count whole batch as failed and continue
+            job!.failed += batch.length;
+            try {
+              await prisma.imageJob.update({ where: { id: jobId }, data: { failed: job!.failed } });
+            } catch {}
           }
         } finally {
           await runNext();
@@ -257,13 +304,24 @@ export async function startProcessing(
         job.status = "cancelled";
         job.finishedAt = Date.now();
         jobs.set(jobId, job);
+        try {
+          await prisma.imageJob.update({ where: { id: jobId }, data: { status: "CANCELLED" } });
+        } catch {}
       } else {
-        job.status = "completed";
+        // Only mark COMPLETED if all images are processed
+        if (job.processed >= job.total) {
+          job.status = "completed";
+          try {
+            await prisma.imageJob.update({ where: { id: jobId }, data: { status: "COMPLETED" } });
+          } catch {}
+        } else {
+          job.status = "failed";
+          try {
+            await prisma.imageJob.update({ where: { id: jobId }, data: { status: "FAILED" } });
+          } catch {}
+        }
         job.finishedAt = Date.now();
         jobs.set(jobId, job);
-        try {
-          await prisma.imageJob.update({ where: { id: jobId }, data: { status: "COMPLETED" } });
-        } catch {}
       }
     } catch (err: unknown) {
       job.status = "failed";

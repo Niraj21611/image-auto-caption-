@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { getProgress } from "@/lib/actions/caption.actions";
 
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
 export async function GET(
   req: Request,
   context: { params: Promise<{ jobId: string }> }
