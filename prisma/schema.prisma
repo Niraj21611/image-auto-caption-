@@ -43,13 +43,14 @@ model UserActivity {
 }
 
 model ImageJob {
-    id          String   @id @default(auto()) @map("_id") @db.ObjectId
-    dirPath     String
-    totalImages Int
-    processed   Int      @default(0)
-    status      String   @default("RUNNING")
-    createdAt   DateTime @default(now())
-    updatedAt   DateTime @updatedAt
+    id           String         @id @default(auto()) @map("_id") @db.ObjectId
+    dirPath      String
+    totalImages  Int
+    processed    Int            @default(0)
+    status       String         @default("RUNNING")
+    createdAt    DateTime       @default(now())
+    updatedAt    DateTime       @updatedAt
+    ImageCaption ImageCaption[]
 }
 
 model ImageCaption {
@@ -58,6 +59,9 @@ model ImageCaption {
     status      ImageStatus @default(CAPTIONED)
     preCaption  String
     postCaption String?
-    createdAt   DateTime    @default(now())
-    updatedAt   DateTime    @updatedAt
+    jobId       String?     @db.ObjectId
+    Job         ImageJob?   @relation(fields: [jobId], references: [id])
+
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
 }

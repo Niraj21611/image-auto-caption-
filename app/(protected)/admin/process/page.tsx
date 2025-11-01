@@ -4,7 +4,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { FolderSearch, Play, History, Sparkles, CheckCircle2, XCircle, Loader2 } from "lucide-react";
+import { FolderSearch, Play, History, Sparkles, CheckCircle2, XCircle, Loader2, StopCircle, HelpCircle } from "lucide-react";
+import { getHistory as getHistoryAction } from "@/lib/actions/caption.actions";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 type AnalyzeResponse = { success: true; jobId: string; count: number } | { success: false; error: string };
 type StartResponse = { success: true; started: boolean } | { success: false; error: string };
@@ -22,7 +24,7 @@ type ProgressResponse =
       };
     }
   | { success: false; error: string };
-type HistoryResponse = { success: true; data: { dirPath: string; count: number; processedAt: string }[] } | { success: false; error: string };
+type HistoryRow = { jobId: string; dirPath: string; status: string; processed: number; total: number; createdAt: string };
 
 export default function ProcessPage() {
   const [dirPath, setDirPath] = useState("");
@@ -30,10 +32,13 @@ export default function ProcessPage() {
   const [imageCount, setImageCount] = useState<number | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isStarting, setIsStarting] = useState(false);
+  const [isStopping, setIsStopping] = useState(false);
+  const [batchSize, setBatchSize] = useState<number>(2);
+  const [concurrency, setConcurrency] = useState<number>(1);
   const [progress, setProgress] = useState<{ processed: number; total: number; status: string; error?: string; startedAt?: number } | null>(
     null
   );
-  const [history, setHistory] = useState<{ dirPath: string; count: number; processedAt: string }[]>([]);
+  const [history, setHistory] = useState<HistoryRow[]>([]);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const pct = useMemo(() => {
@@ -58,9 +63,8 @@ export default function ProcessPage() {
   }, [progress]);
 
   const fetchHistory = useCallback(async () => {
-    const res = await fetch("/api/caption/history", { cache: "no-store" });
-    const data: HistoryResponse = await res.json();
-    if (data.success) setHistory(data.data);
+    const data = await getHistoryAction(50);
+    if (data.success) setHistory(data.data as HistoryRow[]);
   }, []);
 
 
@@ -97,7 +101,7 @@ export default function ProcessPage() {
       const res = await fetch("/api/caption/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ jobId, dirPath }),
+        body: JSON.stringify({ jobId, dirPath, batchSize, concurrency }),
       });
       const data: StartResponse = await res.json();
       if (!data.success) {
@@ -130,6 +134,24 @@ export default function ProcessPage() {
       }, 1000); // Poll every 1 second for faster updates
     } finally {
       setIsStarting(false);
+    }
+  };
+
+  const stop = async () => {
+    if (!jobId) return;
+    setIsStopping(true);
+    try {
+      const res = await fetch("/api/caption/stop", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jobId }),
+      });
+      const data = await res.json();
+      if (!data.success) {
+        alert(`Stop error: ${data.error || "Unknown"}`);
+      }
+    } finally {
+      setIsStopping(false);
     }
   };
 
@@ -200,7 +222,7 @@ export default function ProcessPage() {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_auto_auto_auto] items-end">
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-[1fr_auto_auto_auto_auto_auto_auto] items-end">
             <div className="space-y-2">
               <label className="text-xs font-medium text-gray-700">Directory Path</label>
               <div className="flex gap-2">
@@ -212,6 +234,52 @@ export default function ProcessPage() {
                 />
             
               </div>
+            </div>
+            <div className="space-y-2">
+              <div className="flex items-center gap-1">
+                <label className="text-xs font-medium text-gray-700">Batch Size</label>
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <HelpCircle className="w-3 h-3 text-gray-500 cursor-help" />
+                    </TooltipTrigger>
+                    <TooltipContent className="max-w-xs">
+                      <p className="text-xs">Number of images sent per API request. Lower values reduce token usage and rate limits.</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              </div>
+              <Input
+                type="number"
+                min={1}
+                max={10}
+                value={batchSize}
+                onChange={(e) => setBatchSize(Math.max(1, Number(e.target.value) || 1))}
+                className="h-11 w-24 bg-white border-purple-200 focus:border-purple-500 focus:ring-purple-500"
+              />
+            </div>
+            <div className="space-y-2">
+              <div className="flex items-center gap-1">
+                <label className="text-xs font-medium text-gray-700">Concurrency</label>
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <HelpCircle className="w-3 h-3 text-gray-500 cursor-help" />
+                    </TooltipTrigger>
+                    <TooltipContent className="max-w-xs">
+                      <p className="text-xs">Number of parallel batches. Start with 1 for rate-limited accounts.</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              </div>
+              <Input
+                type="number"
+                min={1}
+                max={6}
+                value={concurrency}
+                onChange={(e) => setConcurrency(Math.max(1, Number(e.target.value) || 1))}
+                className="h-11 w-24 bg-white border-purple-200 focus:border-purple-500 focus:ring-purple-500"
+              />
             </div>
             <Button 
               onClick={analyze} 
@@ -232,7 +300,7 @@ export default function ProcessPage() {
             </Button>
             <Button 
               onClick={start} 
-              disabled={!jobId || isStarting}
+              disabled={!jobId || isStarting || progress?.status === 'running'}
               className="h-11 bg-green-600 hover:bg-green-700 text-white gap-2"
             >
               {isStarting ? (
@@ -243,10 +311,29 @@ export default function ProcessPage() {
               ) : (
                 <>
                   <Play className="w-4 h-4" />
-                  Start Processing
+                  {progress?.status === 'cancelled' ? 'Resume' : 'Start'}
                 </>
               )}
             </Button>
+            {progress?.status === 'running' && (
+              <Button 
+                onClick={stop} 
+                disabled={isStopping}
+                className="h-11 bg-red-600 hover:bg-red-700 text-white gap-2"
+              >
+                {isStopping ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Stopping...
+                  </>
+                ) : (
+                  <>
+                    <StopCircle className="w-4 h-4" />
+                    Stop
+                  </>
+                )}
+              </Button>
+            )}
           </div>
         </div>
 
@@ -361,14 +448,15 @@ export default function ProcessPage() {
               <TableHeader>
                 <TableRow className="bg-gray-50 hover:bg-gray-50">
                   <TableHead className="font-semibold text-gray-700 py-3 px-6">Directory Path</TableHead>
-                  <TableHead className="font-semibold text-gray-700 w-32 text-center py-3 px-6">Images</TableHead>
-                  <TableHead className="font-semibold text-gray-700 w-48 text-right py-3 px-6">Processed At</TableHead>
+                  <TableHead className="font-semibold text-gray-700 w-28 text-center py-3 px-6">Status</TableHead>
+                  <TableHead className="font-semibold text-gray-700 w-40 text-center py-3 px-6">Progress</TableHead>
+                  <TableHead className="font-semibold text-gray-700 w-48 text-right py-3 px-6">Started</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {history.length === 0 ? (
                   <TableRow className="hover:bg-transparent">
-                    <TableCell colSpan={3} className="py-12 px-6">
+                    <TableCell colSpan={4} className="py-12 px-6">
                       <div className="flex flex-col items-center justify-center text-center">
                         <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-3">
                           <History className="w-8 h-8 text-gray-400" />
@@ -380,7 +468,7 @@ export default function ProcessPage() {
                   </TableRow>
                 ) : (
                   history.map((h) => {
-                    const processedDate = new Date(h.processedAt);
+                    const processedDate = new Date(h.createdAt);
                     const now = new Date();
                     const diffMs = now.getTime() - processedDate.getTime();
                     const diffMins = Math.floor(diffMs / 60000);
@@ -400,15 +488,22 @@ export default function ProcessPage() {
                     
                     return (
                       <TableRow 
-                        key={`${h.dirPath}-${h.count}-${h.processedAt}`}
+                        key={`${h.jobId}`}
                         className="hover:bg-blue-50/50 transition-colors"
                       >
                         <TableCell className="font-mono text-xs sm:text-sm break-all py-4 px-6 text-gray-700">
                           {h.dirPath}
                         </TableCell>
                         <TableCell className="text-center py-4 px-6">
+                          <span className={`inline-flex items-center justify-center px-3 py-1 rounded-full text-xs font-semibold
+                            ${h.status === 'COMPLETED' ? 'bg-green-100 text-green-700' : h.status === 'RUNNING' ? 'bg-orange-100 text-orange-700' : h.status === 'FAILED' ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-700'}`}
+                          >
+                            {h.status}
+                          </span>
+                        </TableCell>
+                        <TableCell className="text-center py-4 px-6">
                           <span className="inline-flex items-center justify-center px-3 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-700">
-                            {h.count}
+                            {h.processed}/{h.total}
                           </span>
                         </TableCell>
                         <TableCell className="text-right py-4 px-6">
