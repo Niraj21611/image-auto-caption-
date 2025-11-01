@@ -26,6 +26,7 @@ type HistoryResponse = { success: true; data: { dirPath: string; count: number; 
 
 export default function ProcessPage() {
   const [dirPath, setDirPath] = useState("");
+  const [basePath, setBasePath] = useState("");
   const [jobId, setJobId] = useState<string | null>(null);
   const [imageCount, setImageCount] = useState<number | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -64,28 +65,64 @@ export default function ProcessPage() {
     if (data.success) setHistory(data.data);
   }, []);
 
-  const handleBrowseDirectory = () => {
-    if (fileInputRef.current) {
-      fileInputRef.current.click();
+  useEffect(() => {
+    // load persisted base path
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("captionBasePath") || "";
+      if (saved) setBasePath(saved);
     }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      localStorage.setItem("captionBasePath", basePath);
+    }
+  }, [basePath]);
+
+  const joinPath = (a: string, b: string) => {
+    if (!a) return b;
+    if (!b) return a;
+    const sep = a.includes("\\") || b.includes("\\") ? "\\" : "/";
+    const aTrim = a.endsWith("/") || a.endsWith("\\") ? a.slice(0, -1) : a;
+    const bTrim = b.startsWith("/") || b.startsWith("\\") ? b.slice(1) : b;
+    return `${aTrim}${sep}${bTrim}`;
+  };
+
+  const handleBrowseDirectory = async () => {
+    // Prefer File System Access API when available
+  type DirHandle = { name?: string };
+  const w = window as unknown as { showDirectoryPicker?: () => Promise<DirHandle> };
+    if (typeof w.showDirectoryPicker === "function") {
+      try {
+        const handle = await w.showDirectoryPicker!();
+        const name = handle?.name || "";
+        const combined = name ? joinPath(basePath, name) : basePath;
+        setDirPath(combined || name || dirPath);
+        return;
+      } catch {
+        // user cancelled; fall through to input
+      }
+    }
+    if (fileInputRef.current) fileInputRef.current.click();
   };
 
   const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (files && files.length > 0) {
-      const file = files[0];
-      const relativePath = (file as File & { webkitRelativePath?: string }).webkitRelativePath || "";
-      if (relativePath) {
-        // Get the full absolute path by combining with the file's path
-        // For browser security, we can't get absolute paths, so we'll try to construct it
-        // Extract directory path by removing the filename
-        const parts = relativePath.split("/");
-        if (parts.length > 1) {
-          // Join all parts except the last one (filename)
-          const dirPath = parts.slice(0, -1).join("/");
-          setDirPath(dirPath);
-        }
+      // Derive a common directory prefix from all selected files' relative paths
+      const rels: string[] = [];
+      for (let i = 0; i < files.length; i++) {
+        const f = files[i] as File & { webkitRelativePath?: string };
+        const rp = f.webkitRelativePath || f.name;
+        rels.push(rp);
       }
+      // Compute directory segment (without filename) from first file
+      let relDir = "";
+      const first = rels[0] || "";
+      const idx = first.lastIndexOf("/");
+      if (idx > -1) relDir = first.slice(0, idx);
+      const combined = basePath ? joinPath(basePath, relDir) : relDir;
+      setDirPath(combined || relDir || dirPath);
     }
   };
 
@@ -245,14 +282,14 @@ export default function ProcessPage() {
                   directory=""
                   multiple
                 />
-                <Button
+                {/* <Button
                   onClick={handleBrowseDirectory}
                   variant="outline"
                   className="h-11 px-4 border-purple-300 hover:bg-purple-50 hover:border-purple-400 shrink-0"
                   type="button"
                 >
                   <FolderOpen className="w-4 h-4" />
-                </Button>
+                </Button> */}
               </div>
             </div>
             <Button 

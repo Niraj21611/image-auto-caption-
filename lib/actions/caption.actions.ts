@@ -121,6 +121,37 @@ async function captionBatchWithOpenAI(batch: string[]): Promise<string[]> {
     temperature: 0.2,
   };
 
+  function tryParseCaptions(raw: string): string[] | null {
+    let text = raw.trim();
+    // Strip fenced code blocks like ```json ... ``` or ``` ... ```
+    const fenceMatch = text.match(/```[a-zA-Z]*\n?[\s\S]*?```/);
+    if (fenceMatch) {
+      text = text.replace(/```[a-zA-Z]*\n?([\s\S]*?)```/g, "$1").trim();
+    }
+    // Try direct JSON parse
+    try {
+      const arr = JSON.parse(text);
+      if (Array.isArray(arr)) return arr.map(String);
+    } catch {}
+    // Try to extract first JSON array in the text
+    const jsonArrayMatch = text.match(/\[[\s\S]*\]/);
+    if (jsonArrayMatch) {
+      const snippet = jsonArrayMatch[0];
+      try {
+        const arr = JSON.parse(snippet);
+        if (Array.isArray(arr)) return arr.map(String);
+      } catch {}
+    }
+    // Fallback: split lines and filter obvious noise
+    const lines = text
+      .split(/\r?\n/)
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .filter((s) => !s.startsWith("```") && s.toLowerCase() !== "json" && s !== "[" && s !== "]");
+    if (lines.length) return lines;
+    return null;
+  }
+
   let attempt = 0;
   while (true) {
     const resp = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -143,15 +174,10 @@ async function captionBatchWithOpenAI(batch: string[]): Promise<string[]> {
     }
     const data = await resp.json();
     const out = data.choices?.[0]?.message?.content?.trim() || "";
-    try {
-      const arr = JSON.parse(out);
-      if (Array.isArray(arr)) return arr.map(String);
-    } catch {}
-    // Fallback: split lines
-    return out
-      .split(/\r?\n/)
-      .map((s: string) => s.trim())
-      .filter(Boolean);
+    const parsed = tryParseCaptions(out);
+    if (parsed) return parsed;
+    // last resort
+    return [out];
   }
 }
 
