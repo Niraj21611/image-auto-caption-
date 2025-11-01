@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { FolderSearch, Play, History, Sparkles, CheckCircle2, XCircle, Loader2, FolderOpen } from "lucide-react";
+import { FolderSearch, Play, History, Sparkles, CheckCircle2, XCircle, Loader2 } from "lucide-react";
 
 type AnalyzeResponse = { success: true; jobId: string; count: number } | { success: false; error: string };
 type StartResponse = { success: true; started: boolean } | { success: false; error: string };
@@ -26,7 +26,6 @@ type HistoryResponse = { success: true; data: { dirPath: string; count: number; 
 
 export default function ProcessPage() {
   const [dirPath, setDirPath] = useState("");
-  const [basePath, setBasePath] = useState("");
   const [jobId, setJobId] = useState<string | null>(null);
   const [imageCount, setImageCount] = useState<number | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -36,7 +35,6 @@ export default function ProcessPage() {
   );
   const [history, setHistory] = useState<{ dirPath: string; count: number; processedAt: string }[]>([]);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const pct = useMemo(() => {
     if (!progress || progress.total === 0) return 0;
@@ -65,66 +63,6 @@ export default function ProcessPage() {
     if (data.success) setHistory(data.data);
   }, []);
 
-  useEffect(() => {
-    // load persisted base path
-    if (typeof window !== "undefined") {
-      const saved = localStorage.getItem("captionBasePath") || "";
-      if (saved) setBasePath(saved);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      localStorage.setItem("captionBasePath", basePath);
-    }
-  }, [basePath]);
-
-  const joinPath = (a: string, b: string) => {
-    if (!a) return b;
-    if (!b) return a;
-    const sep = a.includes("\\") || b.includes("\\") ? "\\" : "/";
-    const aTrim = a.endsWith("/") || a.endsWith("\\") ? a.slice(0, -1) : a;
-    const bTrim = b.startsWith("/") || b.startsWith("\\") ? b.slice(1) : b;
-    return `${aTrim}${sep}${bTrim}`;
-  };
-
-  const handleBrowseDirectory = async () => {
-    // Prefer File System Access API when available
-  type DirHandle = { name?: string };
-  const w = window as unknown as { showDirectoryPicker?: () => Promise<DirHandle> };
-    if (typeof w.showDirectoryPicker === "function") {
-      try {
-        const handle = await w.showDirectoryPicker!();
-        const name = handle?.name || "";
-        const combined = name ? joinPath(basePath, name) : basePath;
-        setDirPath(combined || name || dirPath);
-        return;
-      } catch {
-        // user cancelled; fall through to input
-      }
-    }
-    if (fileInputRef.current) fileInputRef.current.click();
-  };
-
-  const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (files && files.length > 0) {
-      // Derive a common directory prefix from all selected files' relative paths
-      const rels: string[] = [];
-      for (let i = 0; i < files.length; i++) {
-        const f = files[i] as File & { webkitRelativePath?: string };
-        const rp = f.webkitRelativePath || f.name;
-        rels.push(rp);
-      }
-      // Compute directory segment (without filename) from first file
-      let relDir = "";
-      const first = rels[0] || "";
-      const idx = first.lastIndexOf("/");
-      if (idx > -1) relDir = first.slice(0, idx);
-      const combined = basePath ? joinPath(basePath, relDir) : relDir;
-      setDirPath(combined || relDir || dirPath);
-    }
-  };
 
   useEffect(() => {
     fetchHistory();
@@ -272,24 +210,7 @@ export default function ProcessPage() {
                   onChange={(e) => setDirPath(e.target.value)}
                   className="h-11 bg-white border-purple-200 focus:border-purple-500 focus:ring-purple-500"
                 />
-                <input
-                  type="file"
-                  ref={fileInputRef}
-                  onChange={handleFileInputChange}
-                  style={{ display: "none" }}
-                  // @ts-expect-error - webkitdirectory is not in standard TypeScript types
-                  webkitdirectory=""
-                  directory=""
-                  multiple
-                />
-                {/* <Button
-                  onClick={handleBrowseDirectory}
-                  variant="outline"
-                  className="h-11 px-4 border-purple-300 hover:bg-purple-50 hover:border-purple-400 shrink-0"
-                  type="button"
-                >
-                  <FolderOpen className="w-4 h-4" />
-                </Button> */}
+            
               </div>
             </div>
             <Button 
