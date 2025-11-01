@@ -22,7 +22,7 @@ type ProgressResponse =
       };
     }
   | { success: false; error: string };
-type HistoryResponse = { success: true; data: { dirPath: string; count: number }[] } | { success: false; error: string };
+type HistoryResponse = { success: true; data: { dirPath: string; count: number; processedAt: string }[] } | { success: false; error: string };
 
 export default function ProcessPage() {
   const [dirPath, setDirPath] = useState("");
@@ -30,16 +30,32 @@ export default function ProcessPage() {
   const [imageCount, setImageCount] = useState<number | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isStarting, setIsStarting] = useState(false);
-  const [progress, setProgress] = useState<{ processed: number; total: number; status: string; error?: string } | null>(
+  const [progress, setProgress] = useState<{ processed: number; total: number; status: string; error?: string; startedAt?: number } | null>(
     null
   );
-  const [history, setHistory] = useState<{ dirPath: string; count: number }[]>([]);
+  const [history, setHistory] = useState<{ dirPath: string; count: number; processedAt: string }[]>([]);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const pct = useMemo(() => {
     if (!progress || progress.total === 0) return 0;
     return Math.floor((progress.processed / progress.total) * 100);
+  }, [progress]);
+
+  const eta = useMemo(() => {
+    if (!progress || !progress.startedAt || progress.processed === 0 || progress.status !== 'running') {
+      return null;
+    }
+    const elapsed = Date.now() - progress.startedAt;
+    const avgTimePerImage = elapsed / progress.processed;
+    const remaining = progress.total - progress.processed;
+    const etaMs = avgTimePerImage * remaining;
+    const etaSeconds = Math.ceil(etaMs / 1000);
+    
+    if (etaSeconds < 60) return `${etaSeconds}s`;
+    const minutes = Math.floor(etaSeconds / 60);
+    const seconds = etaSeconds % 60;
+    return `${minutes}m ${seconds}s`;
   }, [progress]);
 
   const fetchHistory = useCallback(async () => {
@@ -60,10 +76,13 @@ export default function ProcessPage() {
       const file = files[0];
       const relativePath = (file as File & { webkitRelativePath?: string }).webkitRelativePath || "";
       if (relativePath) {
+        // Get the full absolute path by combining with the file's path
+        // For browser security, we can't get absolute paths, so we'll try to construct it
         // Extract directory path by removing the filename
-        const lastSlashIndex = relativePath.lastIndexOf("/");
-        const dirPath = relativePath.substring(0, lastSlashIndex > -1 ? lastSlashIndex : 0);
-        if (dirPath) {
+        const parts = relativePath.split("/");
+        if (parts.length > 1) {
+          // Join all parts except the last one (filename)
+          const dirPath = parts.slice(0, -1).join("/");
           setDirPath(dirPath);
         }
       }
@@ -87,7 +106,7 @@ export default function ProcessPage() {
       if (data.success) {
         setJobId(data.jobId);
         setImageCount(data.count);
-        setProgress({ processed: 0, total: data.count, status: "idle" });
+        setProgress({ processed: 0, total: data.count, status: "idle", startedAt: undefined });
       } else {
         alert(`Analyze error: ${data.error}`);
       }
@@ -103,7 +122,7 @@ export default function ProcessPage() {
       const res = await fetch("/api/caption/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ jobId }),
+        body: JSON.stringify({ jobId, dirPath }),
       });
       const data: StartResponse = await res.json();
       if (!data.success) {
@@ -113,18 +132,27 @@ export default function ProcessPage() {
       // Start polling
       if (pollRef.current) clearInterval(pollRef.current);
       pollRef.current = setInterval(async () => {
-        const resp = await fetch(`/api/caption/progress/${jobId}`, { cache: "no-store" });
+        const resp = await fetch(`/api/caption/progress/${jobId}?dirPath=${encodeURIComponent(dirPath)}`, { cache: "no-store" });
         const payload: ProgressResponse = await resp.json();
         if (payload.success) {
           const j = payload.job;
-          setProgress({ processed: j.processed, total: j.total, status: j.status, error: j.error });
+          setProgress({ 
+            processed: j.processed, 
+            total: j.total, 
+            status: j.status, 
+            error: j.error,
+            startedAt: j.startedAt 
+          });
           if (j.status === "completed" || j.status === "failed" || j.status === "cancelled") {
-            if (pollRef.current) clearInterval(pollRef.current);
-            pollRef.current = null;
-            fetchHistory();
+            if (pollRef.current) {
+              clearInterval(pollRef.current);
+              pollRef.current = null;
+            }
+            // Refresh history when processing is done
+            await fetchHistory();
           }
         }
-      }, 1500);
+      }, 1000); // Poll every 1 second for faster updates
     } finally {
       setIsStarting(false);
     }
@@ -132,20 +160,33 @@ export default function ProcessPage() {
 
   useEffect(() => {
     const onVis = () => {
-      if (document.visibilityState === "visible" && jobId) {
-        fetch(`/api/caption/progress/${jobId}`, { cache: "no-store" })
+      if (document.visibilityState === "visible" && jobId && progress?.status === "running") {
+        fetch(`/api/caption/progress/${jobId}?dirPath=${encodeURIComponent(dirPath)}`, { cache: "no-store" })
           .then((r) => r.json())
           .then((payload: ProgressResponse) => {
             if (payload.success) {
               const j = payload.job;
-              setProgress({ processed: j.processed, total: j.total, status: j.status, error: j.error });
+              setProgress({ 
+                processed: j.processed, 
+                total: j.total, 
+                status: j.status, 
+                error: j.error,
+                startedAt: j.startedAt 
+              });
+              if (j.status === "completed" || j.status === "failed" || j.status === "cancelled") {
+                if (pollRef.current) {
+                  clearInterval(pollRef.current);
+                  pollRef.current = null;
+                }
+                fetchHistory();
+              }
             }
           });
       }
     };
     document.addEventListener("visibilitychange", onVis);
     return () => document.removeEventListener("visibilitychange", onVis);
-  }, [jobId]);
+  }, [jobId, progress?.status, fetchHistory, dirPath]);
 
   useEffect(() => {
     return () => {
@@ -305,6 +346,11 @@ export default function ProcessPage() {
                     }`}>
                       {progress.processed}/{progress.total}
                     </p>
+                    {eta && progress.status === 'running' && (
+                      <p className="text-xs text-orange-600 mt-1 font-medium">
+                        ETA: {eta}
+                      </p>
+                    )}
                   </div>
                   <div className={`w-14 h-14 rounded-full flex items-center justify-center text-xl font-bold ${
                     progress.status === 'completed' ? 'bg-green-100 text-green-700'
@@ -357,13 +403,14 @@ export default function ProcessPage() {
               <TableHeader>
                 <TableRow className="bg-gray-50 hover:bg-gray-50">
                   <TableHead className="font-semibold text-gray-700 py-3 px-6">Directory Path</TableHead>
-                  <TableHead className="font-semibold text-gray-700 w-32 text-right py-3 px-6">Images</TableHead>
+                  <TableHead className="font-semibold text-gray-700 w-32 text-center py-3 px-6">Images</TableHead>
+                  <TableHead className="font-semibold text-gray-700 w-48 text-right py-3 px-6">Processed At</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {history.length === 0 ? (
                   <TableRow className="hover:bg-transparent">
-                    <TableCell colSpan={2} className="py-12 px-6">
+                    <TableCell colSpan={3} className="py-12 px-6">
                       <div className="flex flex-col items-center justify-center text-center">
                         <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-3">
                           <History className="w-8 h-8 text-gray-400" />
@@ -374,21 +421,54 @@ export default function ProcessPage() {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  history.map((h) => (
-                    <TableRow 
-                      key={`${h.dirPath}-${h.count}`}
-                      className="hover:bg-blue-50/50 transition-colors"
-                    >
-                      <TableCell className="font-mono text-xs sm:text-sm break-all py-4 px-6 text-gray-700">
-                        {h.dirPath}
-                      </TableCell>
-                      <TableCell className="text-right py-4 px-6">
-                        <span className="inline-flex items-center justify-center px-3 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-700">
-                          {h.count}
-                        </span>
-                      </TableCell>
-                    </TableRow>
-                  ))
+                  history.map((h) => {
+                    const processedDate = new Date(h.processedAt);
+                    const now = new Date();
+                    const diffMs = now.getTime() - processedDate.getTime();
+                    const diffMins = Math.floor(diffMs / 60000);
+                    const diffHours = Math.floor(diffMins / 60);
+                    const diffDays = Math.floor(diffHours / 24);
+                    
+                    let timeAgo = "";
+                    if (diffDays > 0) {
+                      timeAgo = `${diffDays}d ago`;
+                    } else if (diffHours > 0) {
+                      timeAgo = `${diffHours}h ago`;
+                    } else if (diffMins > 0) {
+                      timeAgo = `${diffMins}m ago`;
+                    } else {
+                      timeAgo = "Just now";
+                    }
+                    
+                    return (
+                      <TableRow 
+                        key={`${h.dirPath}-${h.count}-${h.processedAt}`}
+                        className="hover:bg-blue-50/50 transition-colors"
+                      >
+                        <TableCell className="font-mono text-xs sm:text-sm break-all py-4 px-6 text-gray-700">
+                          {h.dirPath}
+                        </TableCell>
+                        <TableCell className="text-center py-4 px-6">
+                          <span className="inline-flex items-center justify-center px-3 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-700">
+                            {h.count}
+                          </span>
+                        </TableCell>
+                        <TableCell className="text-right py-4 px-6">
+                          <div className="flex flex-col items-end">
+                            <span className="text-xs font-medium text-gray-700">{timeAgo}</span>
+                            <span className="text-xs text-gray-500">
+                              {processedDate.toLocaleString('en-US', {
+                                month: 'short',
+                                day: 'numeric',
+                                hour: '2-digit',
+                                minute: '2-digit'
+                              })}
+                            </span>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })
                 )}
               </TableBody>
             </Table>

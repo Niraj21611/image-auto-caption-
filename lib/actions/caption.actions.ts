@@ -155,9 +155,34 @@ async function captionBatchWithOpenAI(batch: string[]): Promise<string[]> {
   }
 }
 
-export async function startProcessing(jobId: string, batchSize = 5) {
-  const job = jobs.get(jobId);
-  if (!job) return { success: false, error: "Invalid job id" };
+export async function startProcessing(jobId: string, batchSize = 5, dirPath?: string) {
+  let job = jobs.get(jobId);
+  if (!job) {
+    // Attempt to reconstruct the job if a directory was provided
+    if (dirPath) {
+      try {
+        const stats = await fs.promises.stat(dirPath).catch(() => null);
+        if (!stats || !stats.isDirectory()) {
+          return { success: false, error: "Provided path is not a directory or not accessible" };
+        }
+        const images = await listImagesRecursive(dirPath);
+        job = {
+          id: jobId,
+          dirPath,
+          images,
+          total: images.length,
+          processed: 0,
+          status: "idle",
+        };
+        jobs.set(jobId, job);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return { success: false, error: `Invalid job id and failed to create job: ${msg}` };
+      }
+    } else {
+      return { success: false, error: "Invalid job id" };
+    }
+  }
   if (job.status === "running") return { success: true, started: false };
 
   job.status = "running";
@@ -207,13 +232,14 @@ export async function startProcessing(jobId: string, batchSize = 5) {
                 preCaption,
               },
             });
+            // Update progress after each image for real-time updates
+            job.processed += 1;
+            jobs.set(jobId, job);
           } catch (err: unknown) {
             const msg = err instanceof Error ? err.message : String(err);
             console.error("DB upsert error for", filePath, msg);
           }
-          job.processed += 1;
         }
-        jobs.set(jobId, job);
       }
       job.status = "completed";
       job.finishedAt = Date.now();
@@ -229,21 +255,67 @@ export async function startProcessing(jobId: string, batchSize = 5) {
   return { success: true, started: true };
 }
 
-export async function getProgress(jobId: string) {
+export async function getProgress(jobId: string, dirPath?: string) {
   const j = jobs.get(jobId);
-  if (!j) return { success: false, error: "Invalid job id" };
-  return {
-    success: true,
-    job: {
-      status: j.status,
-      total: j.total,
-      processed: j.processed,
-      dirPath: j.dirPath,
-      startedAt: j.startedAt,
-      finishedAt: j.finishedAt,
-      error: j.error,
-    },
-  };
+  if (j) {
+    return {
+      success: true,
+      job: {
+        status: j.status,
+        total: j.total,
+        processed: j.processed,
+        dirPath: j.dirPath,
+        startedAt: j.startedAt,
+        finishedAt: j.finishedAt,
+        error: j.error,
+      },
+    };
+  }
+
+  // Fallback for serverless/stateless: infer progress from DB + filesystem if dirPath provided
+  if (dirPath) {
+    try {
+      const stats = await fs.promises.stat(dirPath).catch(() => null);
+      if (!stats || !stats.isDirectory()) {
+        return { success: false, error: "Provided path is not a directory or not accessible" };
+      }
+      const images = await listImagesRecursive(dirPath);
+      const total = images.length;
+      // Count processed images stored in DB for this dir using explicit list to avoid regex issues on Windows paths
+      const processed = await prisma.imageCaption.count({
+        where: { filePath: { in: images } },
+      });
+      // Earliest and latest timestamps for ETA/finished (also using explicit list)
+      const first = await prisma.imageCaption.findFirst({
+        where: { filePath: { in: images } },
+        orderBy: { createdAt: "asc" },
+        select: { createdAt: true },
+      });
+      const last = await prisma.imageCaption.findFirst({
+        where: { filePath: { in: images } },
+        orderBy: { createdAt: "desc" },
+        select: { createdAt: true },
+      });
+      const status: JobStatus = processed >= total && total > 0 ? "completed" : processed > 0 ? "running" : "idle";
+      return {
+        success: true,
+        job: {
+          status,
+          total,
+          processed,
+          dirPath,
+          startedAt: first?.createdAt ? first.createdAt.getTime() : undefined,
+          finishedAt: status === "completed" && last?.createdAt ? last.createdAt.getTime() : undefined,
+          error: undefined,
+        },
+      };
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return { success: false, error: msg };
+    }
+  }
+
+  return { success: false, error: "Invalid job id" };
 }
 
 export async function getHistory(limit = 50) {
@@ -251,16 +323,29 @@ export async function getHistory(limit = 50) {
     const records = await prisma.imageCaption.findMany({
       orderBy: { createdAt: "desc" },
       take: 500,
-      select: { filePath: true },
+      select: { filePath: true, createdAt: true },
     });
-    const counts = new Map<string, number>();
+    const dirMap = new Map<string, { count: number; latestCreatedAt: Date }>();
     for (const r of records) {
       const dir = path.dirname(r.filePath);
-      counts.set(dir, (counts.get(dir) || 0) + 1);
+      const existing = dirMap.get(dir);
+      if (existing) {
+        existing.count += 1;
+        if (r.createdAt > existing.latestCreatedAt) {
+          existing.latestCreatedAt = r.createdAt;
+        }
+      } else {
+        dirMap.set(dir, { count: 1, latestCreatedAt: r.createdAt });
+      }
     }
-    const rows = Array.from(counts.entries())
+    const rows = Array.from(dirMap.entries())
+      .sort((a, b) => b[1].latestCreatedAt.getTime() - a[1].latestCreatedAt.getTime())
       .slice(0, limit)
-      .map(([dirPath, count]) => ({ dirPath, count }));
+      .map(([dirPath, data]) => ({ 
+        dirPath, 
+        count: data.count,
+        processedAt: data.latestCreatedAt.toISOString()
+      }));
     return { success: true, data: rows };
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
