@@ -142,8 +142,9 @@ export async function startProcessing(
       // Build worker pool and process in parallel batches
   const cpu = Math.max(1, (os.cpus()?.length || 2) - 1);
   const envConcurrency = Number.parseInt(process.env.CAPTION_CONCURRENCY || "", 10);
+  const forceSerial = String(process.env.CAPTION_FORCE_SERIAL || "").toLowerCase() === "1";
   const requested = typeof concurrency === "number" && !Number.isNaN(concurrency) ? concurrency : (isNaN(envConcurrency) ? 1 : envConcurrency);
-  const poolSize = Math.max(1, Math.min(requested, 6, cpu));
+  const poolSize = forceSerial ? 1 : Math.max(1, Math.min(requested, 6, cpu));
       const apiKey = process.env.OPENAI_API_KEY || "";
       const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
       if (!apiKey) throw new Error("OPENAI_API_KEY is not set");
@@ -165,7 +166,8 @@ export async function startProcessing(
   const configuredBatch = Number.parseInt(process.env.CAPTION_BATCH_SIZE || "", 10);
   // Request override (batchSize param) has highest priority
   const requestedBatch = typeof batchSize === "number" && !Number.isNaN(batchSize) ? batchSize : undefined;
-  const effBatchSize = Math.max(1, (requestedBatch ?? (isNaN(configuredBatch) ? 5 : configuredBatch)));
+  const effBatchSizeRaw = Math.max(1, (requestedBatch ?? (isNaN(configuredBatch) ? 5 : configuredBatch)));
+  const effBatchSize = forceSerial ? 1 : effBatchSizeRaw;
       const batches: string[][] = [];
       for (let i = 0; i < remainingImages.length; i += effBatchSize) {
         batches.push(remainingImages.slice(i, i + effBatchSize));
