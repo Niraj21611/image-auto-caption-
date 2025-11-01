@@ -41,7 +41,6 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { DialogOverlay } from "@radix-ui/react-dialog";
 import {
   changePassword,
   createUser,
@@ -130,7 +129,7 @@ export default function Page() {
         const ids = res.data.map((u: User) => u.id);
         const d = await getUsersTodayDurations(ids);
         if (d.success && d.data) {
-          setTodayDurations(d.data as any);
+          setTodayDurations(d.data);
         }
       } else {
         toast.error(res.error || "Failed to load users");

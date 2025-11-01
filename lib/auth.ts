@@ -3,6 +3,7 @@ import CredentialsProvider from "next-auth/providers/credentials";
 import prisma from "./prisma";
 import { UserRole } from "@prisma/client";
 import { PrismaAdapter } from "@next-auth/prisma-adapter";
+import { JWT } from "next-auth/jwt";
 
 export const nextauthOptions: NextAuthOptions = {
   adapter: PrismaAdapter(prisma),
@@ -94,12 +95,12 @@ export const nextauthOptions: NextAuthOptions = {
     },
     async signOut({ token }) {
       try {
-        const userId = (token as any)?.sub || (token as any)?.id;
+        const userId = (token as JWT)?.sub || (token as { id?: string })?.id;
         if (!userId) return;
         const latestActivity = await prisma.userActivity.findFirst({
           where: {
             userId,
-            OR: [{ logoutAt: null }, { logoutAt: { isSet: false } } as any],
+            OR: [{ logoutAt: null }, { logoutAt: { isSet: false } }],
           },
           orderBy: [{ loginAt: "desc" }, { createdAt: "desc" }],
         });

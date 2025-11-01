@@ -1,7 +1,6 @@
 "use server";
 
 import prisma from "../prisma";
-import { Prisma } from "@prisma/client";
 
 export async function createUser(
   email: string,
@@ -112,11 +111,21 @@ function formatDuration(totalMinutes: number): string {
 
 export async function getUsersTodayDurations(userIds: string[]) {
   try {
-    if (!userIds || userIds.length === 0) 
-      return { success: true, data: {} as Record<string, { minutes: number; formatted: string; isOnline: boolean }> };
+    if (!userIds || userIds.length === 0)
+      return {
+        success: true,
+        data: {} as Record<
+          string,
+          { minutes: number; formatted: string; isOnline: boolean }
+        >,
+      };
 
     const now = new Date();
-    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const startOfDay = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate()
+    );
     const endOfDay = new Date(startOfDay);
     endOfDay.setDate(startOfDay.getDate() + 1);
 
@@ -127,7 +136,7 @@ export async function getUsersTodayDurations(userIds: string[]) {
         OR: [
           { logoutAt: null },
           { logoutAt: { gt: startOfDay } },
-          { logoutAt: { isSet: false } as any },
+          { logoutAt: { isSet: false } },
         ],
       },
       select: {
@@ -140,7 +149,7 @@ export async function getUsersTodayDurations(userIds: string[]) {
 
     const totals = new Map<string, number>();
     const onlineUsers = new Set<string>();
-    
+
     for (const act of activities) {
       const start = act.loginAt < startOfDay ? startOfDay : act.loginAt;
       const rawEnd = act.logoutAt ?? now;
@@ -148,19 +157,22 @@ export async function getUsersTodayDurations(userIds: string[]) {
       const diff = Math.max(0, end.getTime() - start.getTime());
       const mins = Math.floor(diff / 60000);
       totals.set(act.userId, (totals.get(act.userId) || 0) + mins);
-      
+
       if (!act.logoutAt) {
         onlineUsers.add(act.userId);
       }
     }
 
-    const result: Record<string, { minutes: number; formatted: string; isOnline: boolean }> = {};
+    const result: Record<
+      string,
+      { minutes: number; formatted: string; isOnline: boolean }
+    > = {};
     for (const id of userIds) {
       const mins = totals.get(id) || 0;
-      result[id] = { 
-        minutes: mins, 
+      result[id] = {
+        minutes: mins,
         formatted: formatDuration(mins),
-        isOnline: onlineUsers.has(id)
+        isOnline: onlineUsers.has(id),
       };
     }
 
@@ -171,7 +183,11 @@ export async function getUsersTodayDurations(userIds: string[]) {
   }
 }
 
-export async function getUserWeeklyActivity(userId: string, startDate: Date, endDate: Date) {
+export async function getUserWeeklyActivity(
+  userId: string,
+  startDate: Date,
+  endDate: Date
+) {
   try {
     const activities = await prisma.userActivity.findMany({
       where: {
@@ -194,7 +210,7 @@ export async function getUserWeeklyActivity(userId: string, startDate: Date, end
       const da = String(d.getDate()).padStart(2, "0");
       return `${y}-${m}-${da}`;
     };
-    
+
     for (const act of activities) {
       // Compute boundaries using the local day of loginAt to avoid UTC shifting
       const loginLocal = new Date(act.loginAt);
@@ -206,19 +222,20 @@ export async function getUserWeeklyActivity(userId: string, startDate: Date, end
       const dayEnd = new Date(dayStart);
       dayEnd.setDate(dayEnd.getDate() + 1);
       const dateKey = fmtLocalKey(dayStart);
-      
+
       const start = act.loginAt < dayStart ? dayStart : act.loginAt;
       const rawEnd = act.logoutAt ?? now;
       const end = rawEnd > dayEnd ? dayEnd : rawEnd;
       const diff = Math.max(0, end.getTime() - start.getTime());
       const mins = Math.floor(diff / 60000);
-      
+
       dailyTotals.set(dateKey, (dailyTotals.get(dateKey) || 0) + mins);
     }
 
-    const result: Array<{ date: string; minutes: number; formatted: string }> = [];
+    const result: Array<{ date: string; minutes: number; formatted: string }> =
+      [];
     const current = new Date(startDate);
-    
+
     while (current < endDate) {
       // Build keys in local time to match grouping
       const dateKey = fmtLocalKey(current);
@@ -231,7 +248,10 @@ export async function getUserWeeklyActivity(userId: string, startDate: Date, end
       current.setDate(current.getDate() + 1);
     }
 
-    const totalMinutes = Array.from(dailyTotals.values()).reduce((sum, m) => sum + m, 0);
+    const totalMinutes = Array.from(dailyTotals.values()).reduce(
+      (sum, m) => sum + m,
+      0
+    );
 
     return {
       success: true,
