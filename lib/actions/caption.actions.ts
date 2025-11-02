@@ -212,23 +212,54 @@ export async function startProcessing(
                 return reject(err);
               }
             }
-            const timeoutMs = Number.parseInt(process.env.CAPTION_WORKER_TIMEOUT_MS || "", 10);
-            const ms = Math.max(30000, isNaN(timeoutMs) ? 180000 : timeoutMs);
-            const to = setTimeout(() => {
-              w.terminate();
+            const baseTimeout = Number.parseInt(process.env.CAPTION_WORKER_TIMEOUT_BASE_MS || "", 10);
+            const perImageTimeout = Number.parseInt(process.env.CAPTION_WORKER_TIMEOUT_PER_IMAGE_MS || "", 10);
+            const fallbackMs = Number.parseInt(process.env.CAPTION_WORKER_TIMEOUT_MS || "", 10);
+            // Backward compat: CAPTION_WORKER_TIMEOUT_MS overrides if set
+            const dynamicMs = (isNaN(baseTimeout) ? 180000 : Math.max(30000, baseTimeout)) + (isNaN(perImageTimeout) ? 30000 : Math.max(0, perImageTimeout)) * batch.length;
+            let ms = isNaN(fallbackMs) ? dynamicMs : Math.max(30000, fallbackMs);
+            // Hard cap to 15 minutes to avoid runaway workers
+            ms = Math.min(ms, 15 * 60 * 1000);
+
+            let to: NodeJS.Timeout | undefined = setTimeout(() => {
+              try { w.terminate(); } catch {}
               reject(new Error("Worker timed out"));
             }, ms);
-            w.once("message", (msg: unknown) => {
-              const m = msg as { ok?: boolean; captions?: unknown; error?: unknown };
-              clearTimeout(to);
+
+            const resetTimer = () => {
+              if (to) clearTimeout(to);
+              to = setTimeout(() => {
+                try { w.terminate(); } catch {}
+                reject(new Error("Worker timed out"));
+              }, ms);
+            };
+
+            const onMessage = (msg: unknown) => {
+              const m = msg as { ok?: boolean; captions?: unknown; error?: unknown; type?: string };
               if (m?.ok) {
+                if (to) clearTimeout(to);
+                w.removeAllListeners("message");
+                w.removeAllListeners("error");
                 const arr = Array.isArray(m.captions) ? (m.captions as string[]) : [];
-                resolve(arr);
+                return resolve(arr);
               }
-              else reject(new Error((m?.error as string) || "Worker failed"));
-            });
+              if (m?.type === "progress") {
+                // Heartbeat/progress from worker; keep it alive
+                resetTimer();
+                return;
+              }
+              if (m && Object.prototype.hasOwnProperty.call(m, "error")) {
+                if (to) clearTimeout(to);
+                w.removeAllListeners("message");
+                w.removeAllListeners("error");
+                return reject(new Error((m as any).error || "Worker failed"));
+              }
+            };
+
+            w.on("message", onMessage);
             w.once("error", (err) => {
-              clearTimeout(to);
+              if (to) clearTimeout(to);
+              w.removeAllListeners("message");
               reject(err);
             });
             w.postMessage({ images: batch, apiKey, model });
