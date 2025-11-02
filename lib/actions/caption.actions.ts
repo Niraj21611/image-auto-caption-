@@ -190,6 +190,12 @@ export async function startProcessing(
         const idx = cursor++;
         if (idx >= batches.length) return;
         const batch = batches[idx];
+        // Re-check completion for this batch to avoid redundant worker calls
+        const work = batch.filter((f) => !doneSet.has(f));
+        if (work.length === 0) {
+          // Nothing left to do in this batch
+          return;
+        }
         
         // Periodic stop check every 3 batches
         if (idx % 3 === 0) await checkStop();
@@ -252,7 +258,8 @@ export async function startProcessing(
                 if (to) clearTimeout(to);
                 w.removeAllListeners("message");
                 w.removeAllListeners("error");
-                return reject(new Error((m as any).error || "Worker failed"));
+                const em = (m as { error?: string }).error ?? "Worker failed";
+                return reject(new Error(em));
               }
             };
 
@@ -262,14 +269,14 @@ export async function startProcessing(
               w.removeAllListeners("message");
               reject(err);
             });
-            w.postMessage({ images: batch, apiKey, model });
+            w.postMessage({ images: work, apiKey, model });
           });
 
-          while (captions.length < batch.length) captions.push("");
-          if (captions.length > batch.length) captions.length = batch.length;
+          while (captions.length < work.length) captions.push("");
+          if (captions.length > work.length) captions.length = work.length;
 
-          for (let k = 0; k < batch.length; k++) {
-            const filePath = batch[k];
+          for (let k = 0; k < work.length; k++) {
+            const filePath = work[k];
             const preCaption = captions[k] || "";
             try {
               // Skip if already exists (race-safe)
@@ -294,6 +301,7 @@ export async function startProcessing(
                 },
               });
               job!.processed += 1;
+              doneSet.add(filePath);
               jobs.set(jobId, job as JobState);
               try {
                 await prisma.imageJob.update({ where: { id: jobId }, data: { processed: job!.processed } });
@@ -313,11 +321,12 @@ export async function startProcessing(
           if (/rate limit|429/i.test(msg)) {
             const delay = 1200 + Math.floor(Math.random() * 600);
             await new Promise((r) => setTimeout(r, delay));
-            // re-enqueue this batch to try again later
-            batches.push(batch);
+            // Re-enqueue only pending items not yet processed
+            const pending = batch.filter((f) => !doneSet.has(f));
+            if (pending.length) batches.push(pending);
           } else {
             // Count whole batch as failed and continue
-            job!.failed += batch.length;
+            job!.failed += work.length;
             try {
               await prisma.imageJob.update({ where: { id: jobId }, data: { failed: job!.failed } });
             } catch {}
