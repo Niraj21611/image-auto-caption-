@@ -230,7 +230,7 @@ export default async function AssignPage() {
               {users.map((u) => (
                 <Link 
                   key={u.id} 
-                  href={`/admin/assign/${u.id}`}
+                  href={`/admin/user/${u.id}`}
                   className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-neutral-200 bg-white hover:bg-neutral-50 hover:border-blue-300 transition-colors group"
                 >
                   <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
