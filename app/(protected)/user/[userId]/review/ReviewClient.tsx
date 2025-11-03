@@ -13,6 +13,7 @@ import { cn } from "@/lib/utils";
 interface ImageCaption {
   id: string;
   filePath: string;
+  src?: string;
   preCaption: string;
   postCaption: string | null;
   status: string;
@@ -203,8 +204,8 @@ export default function ReviewClient({
                 >
                   <div className="relative aspect-video bg-neutral-100">
                     <Image
-                      src={`file://${caption.filePath}`}
-                      alt={`Thumbnail ${idx + 1}`}
+                      src={caption.src || `file://${caption.filePath}`}
+                      alt={`${idx + 1}`}
                       fill
                       className="object-cover"
                       unoptimized
@@ -228,7 +229,7 @@ export default function ReviewClient({
             <div className="flex-1 bg-neutral-50 flex items-center justify-center p-8">
               <div className="relative w-full h-full max-w-4xl max-h-full">
                 <Image
-                  src={`file://${currentCaption.filePath}`}
+                  src={currentCaption.src || `file://${currentCaption.filePath}`}
                   alt="Preview"
                   fill
                   className="object-contain"

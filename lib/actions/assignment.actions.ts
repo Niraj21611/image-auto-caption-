@@ -62,6 +62,7 @@ export async function assignJobAction(formData: FormData) {
 }
 
 export async function getUserReviewStats(userId: string) {
+	console.log("Getting review stats for userId:", userId);
 	if (!userId) throw new Error("userId is required");
 	const jobs = await prisma.imageJob.findMany({
 		where: { assignedTo: userId },

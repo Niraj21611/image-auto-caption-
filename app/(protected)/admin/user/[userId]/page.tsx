@@ -1,5 +1,13 @@
+"use client";
+
 import Link from "next/link";
-import { ArrowLeft, CheckCircle2, Clock, FolderOpen, TrendingUp } from "lucide-react";
+import {
+  ArrowLeft,
+  CheckCircle2,
+  Clock,
+  FolderOpen,
+  TrendingUp,
+} from "lucide-react";
 import { getUserReviewStats } from "@/lib/actions/assignment.actions";
 import prisma from "@/lib/prisma";
 import {
@@ -11,25 +19,61 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
+import { useParams } from "next/navigation";
+import { useSession } from "next-auth/react";
+import { useEffect, useState } from "react";
 
-type Params = { params: { userId: string } };
-
-export default async function UserAssignPage({ params }: Params) {
-  const { userId } = params;
-  const data = await getUserReviewStats(userId);
-  
-  // Get user details
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { id: true, name: true, email: true },
+export default function UserAssignPage() {
+  const params = useParams<{ userId: string }>();
+  const [data, setData] = useState<{
+    reviewed: number;
+    pending: number;
+    jobs: Array<{
+      id: string;
+      dirPath: string;
+      totalImages: number;
+      processed: number;
+      reviewed: number;
+      createdAt: Date;
+      status: string;
+    }>;
+  }>({
+    reviewed: 0,
+    pending: 0,
+    jobs: [],
   });
+  const userId = params.userId;
+  const { data: sessionData } = useSession();
+  const user = sessionData?.user;
+
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        const res = await getUserReviewStats(userId);
+        if (res) {
+          setData({
+            reviewed: res.reviewed,
+            pending: res.pending,
+            jobs: res.jobs,
+          });
+        }
+      } catch {}
+    };
+
+    fetchData();
+  }, [userId]);
 
   if (!user) {
     return (
       <div className="p-6">
         <div className="text-center py-12">
-          <h2 className="text-xl font-semibold text-neutral-900">User not found</h2>
-          <Link href="/admin/assign" className="text-blue-600 hover:underline mt-2 inline-block">
+          <h2 className="text-xl font-semibold text-neutral-900">
+            User not found
+          </h2>
+          <Link
+            href="/admin/assign"
+            className="text-blue-600 hover:underline mt-2 inline-block"
+          >
             Back to assignments
           </Link>
         </div>
@@ -37,9 +81,10 @@ export default async function UserAssignPage({ params }: Params) {
     );
   }
 
-  const completionRate = data.reviewed + data.pending > 0 
-    ? Math.round((data.reviewed / (data.reviewed + data.pending)) * 100) 
-    : 0;
+  const completionRate =
+    data.reviewed + data.pending > 0
+      ? Math.round((data.reviewed / (data.reviewed + data.pending)) * 100)
+      : 0;
 
   return (
     <div className="space-y-6">
@@ -91,7 +136,9 @@ export default async function UserAssignPage({ params }: Params) {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm font-medium text-neutral-600">Reviewed</p>
-                <p className="text-3xl font-bold text-green-600 mt-1">{data.reviewed}</p>
+                <p className="text-3xl font-bold text-green-600 mt-1">
+                  {data.reviewed}
+                </p>
               </div>
               <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center">
                 <CheckCircle2 className="w-6 h-6 text-green-600" />
@@ -103,7 +150,9 @@ export default async function UserAssignPage({ params }: Params) {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm font-medium text-neutral-600">Pending</p>
-                <p className="text-3xl font-bold text-amber-600 mt-1">{data.pending}</p>
+                <p className="text-3xl font-bold text-amber-600 mt-1">
+                  {data.pending}
+                </p>
               </div>
               <div className="w-12 h-12 bg-amber-100 rounded-full flex items-center justify-center">
                 <Clock className="w-6 h-6 text-amber-600" />
@@ -114,8 +163,12 @@ export default async function UserAssignPage({ params }: Params) {
           <div className="bg-white rounded-lg border border-neutral-200 p-6 shadow-sm">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-neutral-600">Assigned Batches</p>
-                <p className="text-3xl font-bold text-blue-600 mt-1">{data.jobs.length}</p>
+                <p className="text-sm font-medium text-neutral-600">
+                  Assigned Batches
+                </p>
+                <p className="text-3xl font-bold text-blue-600 mt-1">
+                  {data.jobs.length}
+                </p>
               </div>
               <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center">
                 <FolderOpen className="w-6 h-6 text-blue-600" />
@@ -126,8 +179,12 @@ export default async function UserAssignPage({ params }: Params) {
           <div className="bg-white rounded-lg border border-neutral-200 p-6 shadow-sm">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-neutral-600">Completion Rate</p>
-                <p className="text-3xl font-bold text-purple-600 mt-1">{completionRate}%</p>
+                <p className="text-sm font-medium text-neutral-600">
+                  Completion Rate
+                </p>
+                <p className="text-3xl font-bold text-purple-600 mt-1">
+                  {completionRate}%
+                </p>
               </div>
               <div className="w-12 h-12 bg-purple-100 rounded-full flex items-center justify-center">
                 <TrendingUp className="w-6 h-6 text-purple-600" />
@@ -148,7 +205,8 @@ export default async function UserAssignPage({ params }: Params) {
                   No Assigned Batches
                 </h3>
                 <p className="text-gray-600 max-w-md mx-auto">
-                  This reviewer has no batches assigned yet. Assign batches from the main assignment page.
+                  This reviewer has no batches assigned yet. Assign batches from
+                  the main assignment page.
                 </p>
               </div>
               <Link href="/admin/assign">
@@ -161,28 +219,56 @@ export default async function UserAssignPage({ params }: Params) {
         ) : (
           <div className="bg-white rounded-lg border border-neutral-200 shadow-sm overflow-hidden">
             <div className="px-6 py-4 border-b border-neutral-200">
-              <h3 className="text-lg font-semibold text-neutral-900">Assigned Batches</h3>
-              <p className="text-sm text-neutral-600">Detailed breakdown of review progress</p>
+              <h3 className="text-lg font-semibold text-neutral-900">
+                Assigned Batches
+              </h3>
+              <p className="text-sm text-neutral-600">
+                Detailed breakdown of review progress
+              </p>
             </div>
             <Table>
               <TableHeader>
                 <TableRow className="border-b border-neutral-200 hover:bg-neutral-50">
-                  <TableHead className="font-semibold text-neutral-800">Directory</TableHead>
-                  <TableHead className="font-semibold text-neutral-800">Processed</TableHead>
-                  <TableHead className="font-semibold text-neutral-800">Reviewed</TableHead>
-                  <TableHead className="font-semibold text-neutral-800">Pending</TableHead>
-                  <TableHead className="font-semibold text-neutral-800">Status</TableHead>
-                  <TableHead className="font-semibold text-neutral-800">Progress</TableHead>
+                  <TableHead className="font-semibold text-neutral-800">
+                    Directory
+                  </TableHead>
+                  <TableHead className="font-semibold text-neutral-800">
+                    Processed
+                  </TableHead>
+                  <TableHead className="font-semibold text-neutral-800">
+                    Reviewed
+                  </TableHead>
+                  <TableHead className="font-semibold text-neutral-800">
+                    Pending
+                  </TableHead>
+                  <TableHead className="font-semibold text-neutral-800">
+                    Status
+                  </TableHead>
+                  <TableHead className="font-semibold text-neutral-800">
+                    Progress
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {data.jobs.map((j) => {
-                  const pending = Math.max(0, (j.processed || 0) - (j.reviewed || 0));
-                  const progress = j.processed > 0 ? Math.round((j.reviewed / j.processed) * 100) : 0;
+                  const pending = Math.max(
+                    0,
+                    (j.processed || 0) - (j.reviewed || 0)
+                  );
+                  const progress =
+                    j.processed > 0
+                      ? Math.round((j.reviewed / j.processed) * 100)
+                      : 0;
                   return (
-                    <TableRow key={j.id} className="hover:bg-neutral-50 border-b border-neutral-100 last:border-0">
+                    <TableRow
+                      key={j.id}
+                      className="hover:bg-neutral-50 border-b border-neutral-100 last:border-0"
+                    >
                       <TableCell className="font-medium">
-                        <div className="max-w-[420px] truncate text-neutral-900" title={j.dirPath}>
+                        <div
+                          className="max-w-[420px] truncate text-neutral-900"
+                          title={j.dirPath}
+                        >
                           {j.dirPath}
                         </div>
                         <div className="text-xs text-neutral-500 mt-1">
@@ -207,13 +293,15 @@ export default async function UserAssignPage({ params }: Params) {
                         </span>
                       </TableCell>
                       <TableCell>
-                        <span className="text-sm text-neutral-600">{j.status}</span>
+                        <span className="text-sm text-neutral-600">
+                          {j.status}
+                        </span>
                       </TableCell>
                       <TableCell>
                         <div className="flex items-center gap-2">
                           <div className="flex-1 bg-gray-200 rounded-full h-2 max-w-[100px]">
-                            <div 
-                              className="bg-blue-600 h-2 rounded-full transition-all" 
+                            <div
+                              className="bg-blue-600 h-2 rounded-full transition-all"
                               style={{ width: `${progress}%` }}
                             />
                           </div>

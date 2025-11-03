@@ -4,10 +4,11 @@ import ReviewClient from "./ReviewClient";
 type Params = { params: { userId: string } };
 
 export default async function ReviewPage({ params }: Params) {
-  const { userId } = params;
+  const { userId } = await params;
   
   // Fetch assigned jobs
   const jobs = await getUserAssignedJobs(userId);
+  console.log("Assigned jobs:", jobs);
   
   if (jobs.length === 0) {
     return (
