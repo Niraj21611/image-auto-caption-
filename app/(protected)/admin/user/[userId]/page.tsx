@@ -9,7 +9,7 @@ import {
   TrendingUp,
 } from "lucide-react";
 import { getUserReviewStats } from "@/lib/actions/assignment.actions";
-import prisma from "@/lib/prisma";
+
 import {
   Table,
   TableBody,
@@ -36,6 +36,7 @@ export default function UserAssignPage() {
       reviewed: number;
       createdAt: Date;
       status: string;
+      assignedUser: { name: string; email: string } | null;
     }>;
   }>({
     reviewed: 0,
@@ -43,13 +44,12 @@ export default function UserAssignPage() {
     jobs: [],
   });
   const userId = params.userId;
-  const { data: sessionData } = useSession();
-  const user = sessionData?.user;
 
   useEffect(() => {
     const fetchData = async () => {
       try {
         const res = await getUserReviewStats(userId);
+        console.log("User review stats:", res);
         if (res) {
           setData({
             reviewed: res.reviewed,
@@ -63,7 +63,7 @@ export default function UserAssignPage() {
     fetchData();
   }, [userId]);
 
-  if (!user) {
+  if (!data.jobs.length) {
     return (
       <div className="p-6">
         <div className="text-center py-12">
@@ -119,13 +119,25 @@ export default function UserAssignPage() {
         <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl p-6 border border-blue-200 mb-6">
           <div className="flex items-center gap-4">
             <div className="w-16 h-16 bg-blue-600 rounded-full flex items-center justify-center">
-              <span className="text-2xl font-bold text-white">
-                {(user.name || user.email).charAt(0).toUpperCase()}
-              </span>
+              {data.jobs[0].assignedUser?.name ||
+                (data.jobs[0].assignedUser?.email && (
+                  <span className="text-2xl font-bold text-white">
+                    {(
+                      data.jobs[0].assignedUser?.name ||
+                      data.jobs[0].assignedUser?.email
+                    )
+                      .charAt(0)
+                      .toUpperCase()}
+                  </span>
+                ))}
             </div>
             <div>
-              <h2 className="text-2xl font-bold text-blue-900">{user.name}</h2>
-              <p className="text-blue-700">{user.email}</p>
+              <h2 className="text-2xl font-bold text-blue-900">
+                {data.jobs[0].assignedUser?.name}
+              </h2>
+              <p className="text-blue-700">
+                {data.jobs[0].assignedUser?.email}
+              </p>
             </div>
           </div>
         </div>
