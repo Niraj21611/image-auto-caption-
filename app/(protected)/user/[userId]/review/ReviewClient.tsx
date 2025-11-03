@@ -94,6 +94,22 @@ export default function ReviewClient({
       await submitReview(currentCaption.id, selectedJob.id, postCaption);
       toast.success("Review submitted successfully!");
 
+      // Mark current item as reviewed locally and persist edited caption
+      setCaptions((prev) => {
+        const next = [...prev];
+        const item = next[selectedIndex];
+        if (item) {
+          next[selectedIndex] = {
+            ...item,
+            status: "REVIEWED",
+            postCaption,
+          };
+        }
+        return next;
+      });
+      // Decrease pending count optimistically
+      setTotalPending((t) => Math.max(0, t - 1));
+
       // Move to next image or reload page
       if (selectedIndex < captions.length - 1) {
         setSelectedIndex(selectedIndex + 1);
@@ -210,6 +226,11 @@ export default function ReviewClient({
                       className="object-cover"
                       unoptimized
                     />
+                    {caption.status === "REVIEWED" && (
+                      <span className="absolute top-2 right-2 inline-flex items-center gap-1 rounded-md bg-green-600 text-white px-2 py-0.5 text-[10px] font-medium shadow-sm">
+                        <CheckCircle2 className="w-3 h-3" /> Reviewed
+                      </span>
+                    )}
                   </div>
                   <div className="p-2 bg-white">
                     <p className="text-xs text-neutral-600 truncate">
@@ -236,6 +257,11 @@ export default function ReviewClient({
                   unoptimized
                   priority
                 />
+                {currentCaption.status === "REVIEWED" && (
+                  <div className="absolute top-4 left-4 inline-flex items-center gap-2 rounded-full bg-green-600/90 text-white px-3 py-1 text-xs font-medium shadow">
+                    <CheckCircle2 className="w-4 h-4" /> Reviewed
+                  </div>
+                )}
               </div>
             </div>
 
@@ -279,7 +305,9 @@ export default function ReviewClient({
               <div className="p-6 border-t border-neutral-200">
                 <Button
                   onClick={handleSubmit}
-                  disabled={isSubmitting || !postCaption.trim()}
+                  disabled={
+                    isSubmitting || !postCaption.trim() || currentCaption.status === "REVIEWED"
+                  }
                   className="w-full bg-blue-600 hover:bg-blue-700 font-medium"
                   size="lg"
                 >
@@ -291,7 +319,7 @@ export default function ReviewClient({
                   ) : (
                     <>
                       <CheckCircle2 className="w-4 h-4 mr-2" />
-                      Submit Review
+                      {currentCaption.status === "REVIEWED" ? "Already Reviewed" : "Submit Review"}
                     </>
                   )}
                 </Button>

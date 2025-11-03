@@ -24,6 +24,7 @@ export default async function ReviewPage({ params }: Params) {
   // Get first job and its first page of captions
   const firstJob = jobs[0];
   const initialData = await getCaptionsPage(firstJob.id, 0, 10);
+  console.log("Initial captions page data:", initialData);
 
   if (initialData.items.length === 0) {
     return (

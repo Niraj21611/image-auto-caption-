@@ -55,39 +55,32 @@ export async function getCaptionsPage(jobId: string, page = 0, pageSize = 10) {
 	const skip = Math.max(0, page) * Math.max(1, pageSize);
 	const take = Math.max(1, pageSize);
 
-	// Pending review: not REVIEWED yet
-	const where = {
-		jobId,
-		NOT: { status: "REVIEWED" as const },
-	} as const;
+	// Primary filter: by jobId
 
-		const [itemsRaw, totalPending] = await Promise.all([
-		prisma.imageCaption.findMany({
-			where,
-			orderBy: { createdAt: "asc" },
-			skip,
-			take,
-			select: {
-				id: true,
-				filePath: true,
-				preCaption: true,
-				postCaption: true,
-				status: true,
-				createdAt: true,
-			},
-		}),
-		prisma.imageCaption.count({ where }),
-	]);
+	const itemsRaw = await prisma.imageCaption.findMany({
+		where: {jobId, status: "CAPTIONED"},
+		orderBy: { createdAt: "asc" },
+		skip,
+		take,
+		select: {
+			id: true,
+			filePath: true,
+			preCaption: true,
+			postCaption: true,
+			status: true,
+			createdAt: true,
+		},
+	});
+	const totalPending = await prisma.imageCaption.count({ where: {jobId, status: "CAPTIONED"} });
+	// Map to include data URL src for client rendering
+	const items = await Promise.all(
+		itemsRaw.map(async (it) => ({
+			...it,
+			src: await filePathToDataUrl(it.filePath),
+		}))
+	);
 
-		// Map to include data URL src for client rendering
-		const items = await Promise.all(
-			itemsRaw.map(async (it) => ({
-				...it,
-				src: await filePathToDataUrl(it.filePath),
-			}))
-		);
-
-		return { items, totalPending, page, pageSize };
+	return { items, totalPending, page, pageSize };
 }
 
 // Form post server action
@@ -102,10 +95,12 @@ export async function submitReviewAction(formData: FormData) {
 	const reviewerId = session?.user?.id;
 
 	// Idempotent increment: only if transitioning to REVIEWED now
-	const current = await prisma.imageCaption.findUnique({ where: { id: captionId }, select: { id: true, status: true } });
+	const current = await prisma.imageCaption.findUnique({ where: { id: captionId }, select: { id: true, status: true, jobId: true } });
 	if (!current) throw new Error("Caption not found");
+	const realJobId = current.jobId || jobId || undefined;
 
 	if (current.status !== "REVIEWED") {
+		// Update caption, attach jobId if it was missing
 		await prisma.imageCaption.update({
 			where: { id: captionId },
 			data: {
@@ -113,14 +108,19 @@ export async function submitReviewAction(formData: FormData) {
 				status: "REVIEWED",
 				reviewedAt: new Date(),
 				reviewerId: reviewerId ?? undefined,
+				...(current.jobId ? {} : realJobId ? { jobId: realJobId } : {}),
 			},
 		});
 		try {
-			await prisma.imageJob.update({
-				where: { id: jobId },
-				data: { reviewed: { increment: 1 } },
-			});
-		} catch {}
+			if (realJobId) {
+				await prisma.imageJob.update({
+					where: { id: realJobId },
+					data: { reviewed: { increment: 1 } },
+				});
+			}
+		} catch (err) {
+			console.error("Failed to increment job.reviewed", err);
+		}
 	} else {
 		// Already reviewed: still allow postCaption edit without increment
 		await prisma.imageCaption.update({
@@ -133,7 +133,7 @@ export async function submitReviewAction(formData: FormData) {
 	revalidatePath(`/admin/assign`);
 	// Also revalidate reviewer-specific page if the job is assigned
 	try {
-		const job = await prisma.imageJob.findUnique({ where: { id: jobId }, select: { assignedTo: true } });
+		const job = await prisma.imageJob.findUnique({ where: { id: realJobId || jobId }, select: { assignedTo: true } });
 		if (job?.assignedTo) {
 			revalidatePath(`/admin/user/${job.assignedTo}`);
 		}
