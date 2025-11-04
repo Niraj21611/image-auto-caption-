@@ -1,7 +1,10 @@
 "use server";
 
+import { Prisma } from "@prisma/client";
 import prisma from "../prisma";
 import { revalidatePath } from "next/cache";
+import * as fsp from "node:fs/promises";
+import path from "node:path";
 
 // Contract
 // - listCompletedJobs(): jobs ready to assign (COMPLETED or processed>=total)
@@ -91,4 +94,205 @@ export async function getUserReviewStats(userId: string) {
     pending += toReview;
   }
   return { reviewed, pending, jobs };
+}
+
+// --- Admin approval workflow helpers ---
+
+function mimeFromExt(ext: string) {
+  switch (ext.toLowerCase()) {
+    case ".jpg":
+    case ".jpeg":
+      return "image/jpeg";
+    case ".png":
+      return "image/png";
+    case ".webp":
+      return "image/webp";
+    default:
+      return "application/octet-stream";
+  }
+}
+
+async function filePathToDataUrl(filePath: string) {
+  try {
+    const buf = await fsp.readFile(filePath);
+    const ext = path.extname(filePath);
+    const mime = mimeFromExt(ext);
+    const base64 = buf.toString("base64");
+    return `data:${mime};base64,${base64}`;
+  } catch {
+    return "data:application/octet-stream;base64,";
+  }
+}
+
+export async function getUserBatchOverview(userId: string, jobId?: string) {
+  if (!userId) return { success: false, error: "userId are required" };
+
+  try {
+    const jobs = await prisma.imageJob.findMany({
+      where: jobId ? { id: jobId, assignedTo: userId } : { assignedTo: userId },
+      select: { id: true, processed: true },
+    });
+
+    if (!jobs) {
+      return { success: false, error: "No jobs found" };
+    }
+
+    const processed = jobs.reduce((acc, j) => acc + (j.processed || 0), 0);
+
+    const whereBase: Prisma.ImageCaptionWhereInput = jobId
+      ? { jobId, Job: { assignedTo: userId } }
+      : { Job: { assignedTo: userId } };
+
+    const [approved, reviewed, captioned] = await Promise.all([
+      prisma.imageCaption.count({
+        where: { ...whereBase, status: "APPROVED" },
+      }),
+      prisma.imageCaption.count({
+        where: { ...whereBase, status: "REVIEWED" },
+      }),
+      prisma.imageCaption.count({
+        where: { ...whereBase, status: "CAPTIONED" },
+      }),
+    ]);
+
+    const left = Math.max(0, processed - approved);
+
+    revalidatePath("/admin/assign");
+    revalidatePath(`/admin/assign/${userId}`);
+
+    return { success: true, data: { approved, reviewed, captioned, left } };
+  } catch (err) {
+    console.log("Error approving caption:", err);
+    return { success: false, error: "Error approving caption" };
+  }
+}
+
+export async function getProcessedCaptionsForUser(
+  userId: string,
+  jobId?: string
+) {
+  if (!userId) return { success: false, error: "userId is required" };
+
+  try {
+    const where: Prisma.ImageCaptionWhereInput = {
+      status: { in: ["CAPTIONED", "REVIEWED"] },
+      Job: { assignedTo: userId },
+      ...(jobId ? { jobId } : {}),
+    };
+
+    const itemsRaw = await prisma.imageCaption.findMany({
+      where,
+      orderBy: { createdAt: "asc" },
+      select: {
+        id: true,
+        filePath: true,
+        preCaption: true,
+        postCaption: true,
+        status: true,
+        jobId: true,
+        createdAt: true,
+      },
+    });
+
+    const items = await Promise.all(
+      itemsRaw.map(async (it) => ({
+        ...it,
+        src: await filePathToDataUrl(it.filePath),
+      }))
+    );
+
+    revalidatePath("/admin/assign");
+    revalidatePath(`/admin/assign/${userId}`);
+
+    return { success: true, data: items };
+  } catch (err) {
+    console.error("Error fetching processed captions:", err);
+    return { success: false, error: "Error fetching processed captions" };
+  }
+}
+
+export async function approveCaption(captionId: string, userId: string) {
+  if (!captionId || !userId)
+    return { success: false, error: "captionId and userId are required" };
+
+  try {
+    const res = await prisma.imageCaption.update({
+      where: { id: captionId },
+      data: { status: "APPROVED" },
+    });
+
+    if (!res) {
+      return { success: false, error: "Caption approval failed" };
+    }
+
+    revalidatePath("/admin/assign");
+    revalidatePath(`/admin/assign/${userId}`);
+
+    return { success: true, caption: res };
+  } catch (err) {
+    console.log("Error approving caption:", err);
+    return { success: false, error: "Error approving caption" };
+  }
+}
+
+export async function rejectCaption(captionId: string, userId: string) {
+  if (!captionId || !userId)
+    return { success: false, error: "captionId and userId are required" };
+
+  try {
+    const res = await prisma.imageCaption.update({
+      where: { id: captionId },
+      data: { status: "CAPTIONED" },
+    });
+
+    if (!res) {
+      return { success: false, error: "Caption rejection failed" };
+    }
+
+    revalidatePath("/admin/assign");
+    revalidatePath(`/admin/assign/${userId}`);
+
+    return { success: true, caption: res };
+  } catch (err) {
+    console.log("Error rejecting caption:", err);
+    return { success: false, error: "Error rejecting caption" };
+  }
+}
+
+export async function approveAll(userId: string, jobId: string) {
+  if (!jobId || !userId)
+    return { success: false, error: "jobId and userId are required" };
+
+  try {
+    const res = await prisma.imageCaption.updateMany({
+      where: { jobId, status: { in: ["CAPTIONED", "REVIEWED"] } },
+      data: { status: "APPROVED" },
+    });
+
+    if (!res) {
+      return { success: false, error: "All approval failed" };
+    }
+
+    revalidatePath("/admin/assign");
+    revalidatePath(`/admin/assign/${userId}`);
+
+    return { success: true, caption: res };
+  } catch (err) {
+    console.log("Error approving caption:", err);
+    return { success: false, error: "Error approving caption" };
+  }
+}
+
+export async function getUserData(userId: string, jobId: string) {
+  if (!userId) throw new Error("userId is required");
+  if (!jobId) throw new Error("jobId is required");
+  const [user, overview, captions] = await Promise.all([
+    prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, name: true, email: true },
+    }),
+    getUserBatchOverview(userId, jobId),
+    getProcessedCaptionsForUser(userId, jobId),
+  ]);
+  return { user, overview, captions };
 }

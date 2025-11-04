@@ -2,6 +2,25 @@
 
 import prisma from "../prisma";
 
+export async function getUser(userId: string) {
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        name: true,
+        email: true,
+      },
+    });
+    if (!user) {
+      return { success: false, error: "User not found" };
+    }
+    return { success: true, data: user };
+  } catch (err) {
+    console.log("Error creating user", err);
+    return { success: false, error: "Error creating user" };
+  }
+}
+
 export async function createUser(
   email: string,
   password: string,
