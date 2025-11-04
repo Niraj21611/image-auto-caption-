@@ -42,8 +42,6 @@ interface ReviewClientProps {
 }
 
 export default function ReviewClient({
-  userId,
-  jobs,
   initialJob,
   initialData,
 }: ReviewClientProps) {

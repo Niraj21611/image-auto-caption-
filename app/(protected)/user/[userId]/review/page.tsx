@@ -6,9 +6,7 @@ type Params = { params: { userId: string } };
 export default async function ReviewPage({ params }: Params) {
   const { userId } = await params;
   
-  // Fetch assigned jobs
   const jobs = await getUserAssignedJobs(userId);
-  console.log("Assigned jobs:", jobs);
   
   if (jobs.length === 0) {
     return (
@@ -24,7 +22,6 @@ export default async function ReviewPage({ params }: Params) {
   // Get first job and its first page of captions
   const firstJob = jobs[0];
   const initialData = await getCaptionsPage(firstJob.id, 0, 10);
-  console.log("Initial captions page data:", initialData);
 
   if (initialData.items.length === 0) {
     return (

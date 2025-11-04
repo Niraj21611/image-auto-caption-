@@ -1,3 +1,5 @@
+export const dynamic = "force-dynamic";
+
 import Link from "next/link";
 import { Users, FolderCheck, UserCheck, ChevronRight } from "lucide-react";
 import { listCompletedJobs, listUsers, assignJobAction } from "@/lib/actions/assignment.actions";

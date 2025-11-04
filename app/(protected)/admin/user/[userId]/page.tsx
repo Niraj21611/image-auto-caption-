@@ -25,6 +25,7 @@ import { useEffect, useState } from "react";
 
 export default function UserAssignPage() {
   const params = useParams<{ userId: string }>();
+  const [isLoading, setIsLoading] = useState<boolean>(true);
   const [data, setData] = useState<{
     reviewed: number;
     pending: number;
@@ -57,11 +58,23 @@ export default function UserAssignPage() {
             jobs: res.jobs,
           });
         }
-      } catch {}
+      } catch {
+        console.log("Error fetching user review stats");
+      } finally {
+        setIsLoading(false);
+      }
     };
 
     fetchData();
   }, [userId]);
+
+  if (isLoading) {
+    return (
+      <div className="flex justify-center items-center h-40">
+        <div className="h-6 w-6 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+      </div>
+    );
+  }
 
   if (!data.jobs.length) {
     return (
