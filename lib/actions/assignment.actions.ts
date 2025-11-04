@@ -124,24 +124,22 @@ async function filePathToDataUrl(filePath: string) {
   }
 }
 
-export async function getUserBatchOverview(userId: string, jobId?: string) {
-  if (!userId) return { success: false, error: "userId are required" };
+export async function getUserBatchOverview(jobId: string) {
+  if (!jobId) return { success: false, error: "jobId is required" };
 
   try {
-    const jobs = await prisma.imageJob.findMany({
-      where: jobId ? { id: jobId, assignedTo: userId } : { assignedTo: userId },
-      select: { id: true, processed: true },
+    const job = await prisma.imageJob.findUnique({
+      where: { id: jobId },
+      select: { id: true, processed: true, assignedUser: { select: { name: true, email: true } } },
     });
 
-    if (!jobs) {
+    if (!job) {
       return { success: false, error: "No jobs found" };
     }
 
-    const processed = jobs.reduce((acc, j) => acc + (j.processed || 0), 0);
+    const processed = job.processed || 0;
 
-    const whereBase: Prisma.ImageCaptionWhereInput = jobId
-      ? { jobId, Job: { assignedTo: userId } }
-      : { Job: { assignedTo: userId } };
+    const whereBase: Prisma.ImageCaptionWhereInput = { jobId };
 
     const [approved, reviewed, captioned] = await Promise.all([
       prisma.imageCaption.count({
@@ -158,26 +156,22 @@ export async function getUserBatchOverview(userId: string, jobId?: string) {
     const left = Math.max(0, processed - approved);
 
     revalidatePath("/admin/assign");
-    revalidatePath(`/admin/assign/${userId}`);
+    revalidatePath(`/admin/assign/${jobId}`);
 
-    return { success: true, data: { approved, reviewed, captioned, left } };
+    return { success: true, data: { approved, reviewed, captioned, left, user: job.assignedUser } };
   } catch (err) {
     console.log("Error approving caption:", err);
     return { success: false, error: "Error approving caption" };
   }
 }
 
-export async function getProcessedCaptionsForUser(
-  userId: string,
-  jobId?: string
-) {
-  if (!userId) return { success: false, error: "userId is required" };
+export async function getProcessedCaptionsForUser(jobId: string) {
+  if (!jobId) return { success: false, error: "jobId is required" };
 
   try {
     const where: Prisma.ImageCaptionWhereInput = {
-      status: { in: ["CAPTIONED", "REVIEWED"] },
-      Job: { assignedTo: userId },
-      ...(jobId ? { jobId } : {}),
+      status: "REVIEWED",
+      jobId,
     };
 
     const itemsRaw = await prisma.imageCaption.findMany({
@@ -202,7 +196,7 @@ export async function getProcessedCaptionsForUser(
     );
 
     revalidatePath("/admin/assign");
-    revalidatePath(`/admin/assign/${userId}`);
+    revalidatePath(`/admin/assign/${jobId}`);
 
     return { success: true, data: items };
   } catch (err) {
@@ -211,9 +205,8 @@ export async function getProcessedCaptionsForUser(
   }
 }
 
-export async function approveCaption(captionId: string, userId: string) {
-  if (!captionId || !userId)
-    return { success: false, error: "captionId and userId are required" };
+export async function approveCaption(captionId: string) {
+  if (!captionId) return { success: false, error: "captionId is required" };
 
   try {
     const res = await prisma.imageCaption.update({
@@ -226,7 +219,7 @@ export async function approveCaption(captionId: string, userId: string) {
     }
 
     revalidatePath("/admin/assign");
-    revalidatePath(`/admin/assign/${userId}`);
+    revalidatePath(`/admin/assign/${res.jobId}`);
 
     return { success: true, caption: res };
   } catch (err) {
@@ -235,9 +228,8 @@ export async function approveCaption(captionId: string, userId: string) {
   }
 }
 
-export async function rejectCaption(captionId: string, userId: string) {
-  if (!captionId || !userId)
-    return { success: false, error: "captionId and userId are required" };
+export async function rejectCaption(captionId: string) {
+  if (!captionId) return { success: false, error: "captionId is required" };
 
   try {
     const res = await prisma.imageCaption.update({
@@ -250,7 +242,7 @@ export async function rejectCaption(captionId: string, userId: string) {
     }
 
     revalidatePath("/admin/assign");
-    revalidatePath(`/admin/assign/${userId}`);
+    revalidatePath(`/admin/assign/${res.jobId}`);
 
     return { success: true, caption: res };
   } catch (err) {
@@ -259,13 +251,12 @@ export async function rejectCaption(captionId: string, userId: string) {
   }
 }
 
-export async function approveAll(userId: string, jobId: string) {
-  if (!jobId || !userId)
-    return { success: false, error: "jobId and userId are required" };
+export async function approveAll(jobId: string) {
+  if (!jobId) return { success: false, error: "jobId is required" };
 
   try {
     const res = await prisma.imageCaption.updateMany({
-      where: { jobId, status: { in: ["CAPTIONED", "REVIEWED"] } },
+      where: { jobId, status: "REVIEWED" },
       data: { status: "APPROVED" },
     });
 
@@ -274,7 +265,7 @@ export async function approveAll(userId: string, jobId: string) {
     }
 
     revalidatePath("/admin/assign");
-    revalidatePath(`/admin/assign/${userId}`);
+    revalidatePath(`/admin/assign/${jobId}`);
 
     return { success: true, caption: res };
   } catch (err) {
@@ -283,16 +274,3 @@ export async function approveAll(userId: string, jobId: string) {
   }
 }
 
-export async function getUserData(userId: string, jobId: string) {
-  if (!userId) throw new Error("userId is required");
-  if (!jobId) throw new Error("jobId is required");
-  const [user, overview, captions] = await Promise.all([
-    prisma.user.findUnique({
-      where: { id: userId },
-      select: { id: true, name: true, email: true },
-    }),
-    getUserBatchOverview(userId, jobId),
-    getProcessedCaptionsForUser(userId, jobId),
-  ]);
-  return { user, overview, captions };
-}

@@ -13,8 +13,7 @@ import {
   Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { getUserAssignedJobs } from "@/lib/actions/review.actions";
+import { useParams } from "next/navigation";
 import {
   approveAll,
   approveCaption,
@@ -22,22 +21,13 @@ import {
   getUserBatchOverview,
   rejectCaption,
 } from "@/lib/actions/assignment.actions";
-import { getUser } from "@/lib/actions/user.actions";
+import { toast } from "sonner";
 
 type OverviewDataType = {
   approved: number;
   reviewed: number;
   captioned: number;
   left: number;
-};
-
-type UserAssignedJob = {
-  id: string;
-  dirPath: string;
-  totalImages: number;
-  processed: number;
-  reviewed: number;
-  createdAt: Date;
 };
 
 export type ProcessedCaption = {
@@ -52,45 +42,31 @@ export type ProcessedCaption = {
 };
 
 export default function AdminUserAssignPage() {
-  const params = useParams<{ userId: string }>();
-  const searchParams = useSearchParams();
-  const router = useRouter();
+  const params = useParams<{ jobId: string }>();
 
-  const userId = params?.userId;
-  const selectedJobId = searchParams.get("jobId");
+  const jobId = params?.jobId;
 
   const [loading, setLoading] = useState(true);
-  const [jobs, setJobs] = useState<UserAssignedJob[]>([]);
   const [user, setUser] = useState<{ name: string; email: string } | null>(
     null
   );
   const [overview, setOverview] = useState<OverviewDataType | null>(null);
   const [captions, setCaptions] = useState<ProcessedCaption[]>([]);
-  const [activeJobId, setActiveJobId] = useState<string | null>(selectedJobId);
 
   useEffect(() => {
     const fetchAllData = async () => {
       try {
-        if (!userId) return;
+        if (!jobId) return;
         setLoading(true);
 
-        const jobsRes = await getUserAssignedJobs(userId);
-        setJobs(jobsRes);
-
-        const jobId = selectedJobId || jobsRes[0]?.id;
-        setActiveJobId(jobId);
-
-        const [userRes, overviewRes, captionsRes] = await Promise.all([
-          getUser(userId),
-          getUserBatchOverview(userId, jobId),
-          getProcessedCaptionsForUser(userId, jobId),
+        const [overviewRes, captionsRes] = await Promise.all([
+          getUserBatchOverview(jobId),
+          getProcessedCaptionsForUser(jobId),
         ]);
 
-        if (userRes.success && userRes.data) {
-          setUser(userRes.data);
-        }
         if (overviewRes.success && overviewRes.data) {
           setOverview(overviewRes.data);
+          setUser(overviewRes.data.user);
         }
         if (captionsRes.success && captionsRes.data) {
           setCaptions(captionsRes.data);
@@ -103,18 +79,43 @@ export default function AdminUserAssignPage() {
     };
 
     fetchAllData();
-  }, [userId, selectedJobId]);
+  }, [jobId]);
 
   const handleApprove = async (captionId: string) => {
-    await approveCaption(captionId, userId);
+    try {
+      const res = await approveCaption(captionId);
+      if (res.success) {
+        setCaptions((prev) => prev.filter((c) => c.id !== captionId));
+        toast.success("Caption approved");
+      }
+    } catch {
+      toast.error("Error approving caption");
+    }
   };
 
   const handleReject = async (captionId: string) => {
-    await rejectCaption(captionId, userId);
+    try {
+      const res = await rejectCaption(captionId);
+      if (res.success) {
+        setCaptions((prev) => prev.filter((c) => c.id !== captionId));
+        toast.success("Caption rejected");
+      }
+    } catch {
+      toast.error("Error rejecting caption");
+    }
   };
 
   const handleApproveAll = async () => {
-    await approveAll(userId, activeJobId!);
+    try {
+      const res = await approveAll(jobId!);
+      if (res.success) {
+        setCaptions([]);
+        toast.success("All captions approved");
+      }
+    } catch {
+      toast.error("Error approving all captions");
+      return;
+    }
   };
 
   if (loading) {
@@ -126,11 +127,11 @@ export default function AdminUserAssignPage() {
     );
   }
 
-  if (!jobs.length) {
+  if (!captions.length) {
     return (
       <div className="p-6 text-center">
         <h2 className="text-xl font-semibold text-neutral-900">
-          No assigned batches
+          All captions are approved
         </h2>
         <Link
           href="/admin/assign"
@@ -196,20 +197,6 @@ export default function AdminUserAssignPage() {
               </div>
               <div className="text-sm text-neutral-600">{user.email}</div>
             </div>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            {jobs.map((j) => (
-              <Button
-                key={j.id}
-                variant={j.id === activeJobId ? "default" : "outline"}
-                size="sm"
-                onClick={() =>
-                  router.push(`/admin/assign/${userId}?jobId=${j.id}`)
-                }
-              >
-                {j.dirPath.split(/[\\/]/).pop() || j.dirPath}
-              </Button>
-            ))}
           </div>
         </div>
 
