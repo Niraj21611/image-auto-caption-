@@ -3,8 +3,6 @@
 import { Prisma } from "@prisma/client";
 import prisma from "../prisma";
 import { revalidatePath } from "next/cache";
-import * as fsp from "node:fs/promises";
-import path from "node:path";
 
 export async function listCompletedJobs() {
   // Return most recent first, include assigned user info for UI label
@@ -90,41 +88,17 @@ export async function getUserReviewStats(userId: string) {
   return { reviewed, pending, jobs };
 }
 
-// --- Admin approval workflow helpers ---
-
-function mimeFromExt(ext: string) {
-  switch (ext.toLowerCase()) {
-    case ".jpg":
-    case ".jpeg":
-      return "image/jpeg";
-    case ".png":
-      return "image/png";
-    case ".webp":
-      return "image/webp";
-    default:
-      return "application/octet-stream";
-  }
-}
-
-async function filePathToDataUrl(filePath: string) {
-  try {
-    const buf = await fsp.readFile(filePath);
-    const ext = path.extname(filePath);
-    const mime = mimeFromExt(ext);
-    const base64 = buf.toString("base64");
-    return `data:${mime};base64,${base64}`;
-  } catch {
-    return "data:application/octet-stream;base64,";
-  }
-}
-
 export async function getUserBatchOverview(jobId: string) {
   if (!jobId) return { success: false, error: "jobId is required" };
 
   try {
     const job = await prisma.imageJob.findUnique({
       where: { id: jobId },
-      select: { id: true, processed: true, assignedUser: { select: { name: true, email: true } } },
+      select: {
+        id: true,
+        processed: true,
+        assignedUser: { select: { name: true, email: true } },
+      },
     });
 
     if (!job) {
@@ -152,7 +126,10 @@ export async function getUserBatchOverview(jobId: string) {
     revalidatePath("/admin/assign");
     revalidatePath(`/admin/assign/${jobId}`);
 
-    return { success: true, data: { approved, reviewed, captioned, left, user: job.assignedUser } };
+    return {
+      success: true,
+      data: { approved, reviewed, captioned, left, user: job.assignedUser },
+    };
   } catch (err) {
     console.log("Error approving caption:", err);
     return { success: false, error: "Error approving caption" };
@@ -181,17 +158,10 @@ export async function getProcessedCaptionsForUser(jobId: string) {
       },
     });
 
-    const items = await Promise.all(
-      itemsRaw.map(async (it) => ({
-        ...it,
-        src: await filePathToDataUrl(it.filePath),
-      }))
-    );
-
     revalidatePath("/admin/assign");
     revalidatePath(`/admin/assign/${jobId}`);
 
-    return { success: true, data: items };
+    return { success: true, data: itemsRaw };
   } catch (err) {
     console.error("Error fetching processed captions:", err);
     return { success: false, error: "Error fetching processed captions" };
@@ -266,4 +236,3 @@ export async function approveAll(jobId: string) {
     return { success: false, error: "Error approving caption" };
   }
 }
-

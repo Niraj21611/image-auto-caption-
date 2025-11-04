@@ -38,7 +38,6 @@ export type ProcessedCaption = {
   status: "CAPTIONED" | "REVIEWED" | "APPROVED";
   jobId: string | null;
   createdAt: Date;
-  src: string;
 };
 
 export default function AdminUserAssignPage() {
@@ -85,7 +84,11 @@ export default function AdminUserAssignPage() {
     try {
       const res = await approveCaption(captionId);
       if (res.success) {
-        setCaptions((prev) => prev.filter((c) => c.id !== captionId));
+        setCaptions((prev) =>
+          prev.map((c) =>
+            c.id === captionId ? { ...c, status: "APPROVED" } : c
+          )
+        );
         toast.success("Caption approved");
       }
     } catch {
@@ -97,7 +100,12 @@ export default function AdminUserAssignPage() {
     try {
       const res = await rejectCaption(captionId);
       if (res.success) {
-        setCaptions((prev) => prev.filter((c) => c.id !== captionId));
+        setCaptions((prev) =>
+          prev.map((c) =>
+            c.id === captionId ? { ...c, status: "CAPTIONED" } : c
+          )
+        );
+
         toast.success("Caption rejected");
       }
     } catch {
@@ -122,7 +130,7 @@ export default function AdminUserAssignPage() {
     return (
       <div className="flex items-center justify-center h-64 text-blue-600">
         <Loader2 className="w-6 h-6 animate-spin mr-2" />
-        Loading reviewer data...
+        Loading data...
       </div>
     );
   }
@@ -253,12 +261,13 @@ export default function AdminUserAssignPage() {
               >
                 <div className="relative aspect-video bg-neutral-100">
                   <Image
-                    src={c.src}
+                    src={`/api/file?path=${encodeURIComponent(c.filePath)}`}
                     alt="preview"
                     fill
                     className="object-cover"
                     unoptimized
                   />
+
                   <div className="absolute top-2 left-2">
                     {c.status === "APPROVED" ? (
                       <Badge text="Approved" color="blue" />
