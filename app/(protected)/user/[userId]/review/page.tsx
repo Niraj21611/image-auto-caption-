@@ -23,7 +23,7 @@ export default async function ReviewPage({ params }: Params) {
   const firstJob = jobs[0];
   const initialData = await getCaptionsPage(firstJob.id, 0, 10);
 
-  if (initialData.items.length === 0) {
+  if (initialData.itemsRaw.length === 0) {
     return (
       <div className="flex items-center justify-center min-h-screen p-6">
         <div className="text-center space-y-4">

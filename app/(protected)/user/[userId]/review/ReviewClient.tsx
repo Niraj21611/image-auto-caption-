@@ -13,7 +13,6 @@ import { cn } from "@/lib/utils";
 interface ImageCaption {
   id: string;
   filePath: string;
-  src?: string;
   preCaption: string;
   postCaption: string | null;
   status: string;
@@ -34,7 +33,7 @@ interface ReviewClientProps {
   jobs: Job[];
   initialJob: Job;
   initialData: {
-    items: ImageCaption[];
+    itemsRaw: ImageCaption[];
     totalPending: number;
     page: number;
     pageSize: number;
@@ -46,12 +45,12 @@ export default function ReviewClient({
   initialData,
 }: ReviewClientProps) {
   const [selectedJob, setSelectedJob] = useState<Job>(initialJob);
-  const [captions, setCaptions] = useState<ImageCaption[]>(initialData.items);
+  const [captions, setCaptions] = useState<ImageCaption[]>(initialData.itemsRaw);
   const [currentPage, setCurrentPage] = useState(0);
   const [totalPending, setTotalPending] = useState(initialData.totalPending);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [postCaption, setPostCaption] = useState(
-    initialData.items[0]?.postCaption || initialData.items[0]?.preCaption || ""
+    initialData.itemsRaw[0]?.postCaption || initialData.itemsRaw[0]?.preCaption || ""
   );
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isLoadingPage, setIsLoadingPage] = useState(false);
@@ -70,12 +69,12 @@ export default function ReviewClient({
     setIsLoadingPage(true);
     try {
       const data = await getCaptionsPage(jobId, page, 10);
-      setCaptions(data.items);
+      setCaptions(data.itemsRaw);
       setTotalPending(data.totalPending);
       setCurrentPage(page);
       setSelectedIndex(0);
-      if (data.items.length > 0) {
-        setPostCaption(data.items[0].postCaption || data.items[0].preCaption);
+      if (data.itemsRaw.length > 0) {
+        setPostCaption(data.itemsRaw[0].postCaption || data.itemsRaw[0].preCaption);
       }
     } catch (err) {
       toast.error("Failed to load images");
@@ -218,7 +217,9 @@ export default function ReviewClient({
                 >
                   <div className="relative aspect-video bg-neutral-100">
                     <Image
-                      src={caption.src || `file://${caption.filePath}`}
+                      src={`/api/file?path=${encodeURIComponent(
+                        caption.filePath
+                      )}`}
                       alt={`${idx + 1}`}
                       fill
                       className="object-cover"
@@ -248,7 +249,9 @@ export default function ReviewClient({
             <div className="flex-1 bg-neutral-50 flex items-center justify-center p-8">
               <div className="relative w-full h-full max-w-4xl max-h-full">
                 <Image
-                  src={currentCaption.src || `file://${currentCaption.filePath}`}
+                  src={`/api/file?path=${encodeURIComponent(
+                    currentCaption.filePath
+                  )}`}
                   alt="Preview"
                   fill
                   className="object-contain"
@@ -304,7 +307,9 @@ export default function ReviewClient({
                 <Button
                   onClick={handleSubmit}
                   disabled={
-                    isSubmitting || !postCaption.trim() || currentCaption.status === "REVIEWED"
+                    isSubmitting ||
+                    !postCaption.trim() ||
+                    currentCaption.status === "REVIEWED"
                   }
                   className="w-full bg-blue-600 hover:bg-blue-700 font-medium"
                   size="lg"
@@ -317,7 +322,9 @@ export default function ReviewClient({
                   ) : (
                     <>
                       <CheckCircle2 className="w-4 h-4 mr-2" />
-                      {currentCaption.status === "REVIEWED" ? "Already Reviewed" : "Submit Review"}
+                      {currentCaption.status === "REVIEWED"
+                        ? "Already Reviewed"
+                        : "Submit Review"}
                     </>
                   )}
                 </Button>

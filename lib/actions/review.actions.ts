@@ -2,37 +2,9 @@
 
 import prisma from "../prisma";
 import { revalidatePath } from "next/cache";
-import * as fsp from "node:fs/promises";
-import path from "node:path";
 import { getServerSession } from "next-auth";
 import { nextauthOptions } from "@/lib/auth";
 
-function mimeFromExt(ext: string) {
-	switch (ext.toLowerCase()) {
-		case ".jpg":
-		case ".jpeg":
-			return "image/jpeg";
-		case ".png":
-			return "image/png";
-		case ".webp":
-			return "image/webp";
-		default:
-			return "application/octet-stream";
-	}
-}
-
-async function filePathToDataUrl(filePath: string) {
-	try {
-		const buf = await fsp.readFile(filePath);
-		const ext = path.extname(filePath);
-		const mime = mimeFromExt(ext);
-		const base64 = buf.toString("base64");
-		return `data:${mime};base64,${base64}`;
-		} catch {
-		// If file missing or unreadable, return empty data URL to avoid client crash
-		return "data:application/octet-stream;base64,";
-	}
-}
 
 export async function getUserAssignedJobs(userId: string) {
 	if (!userId) throw new Error("userId is required");
@@ -72,15 +44,9 @@ export async function getCaptionsPage(jobId: string, page = 0, pageSize = 10) {
 		},
 	});
 	const totalPending = await prisma.imageCaption.count({ where: {jobId, status: "CAPTIONED"} });
-	// Map to include data URL src for client rendering
-	const items = await Promise.all(
-		itemsRaw.map(async (it) => ({
-			...it,
-			src: await filePathToDataUrl(it.filePath),
-		}))
-	);
 
-	return { items, totalPending, page, pageSize };
+
+	return { itemsRaw, totalPending, page, pageSize };
 }
 
 // Form post server action
