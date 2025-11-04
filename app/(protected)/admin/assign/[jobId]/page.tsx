@@ -127,7 +127,7 @@ export default function AdminUserAssignPage() {
     );
   }
 
-  if (!captions.length) {
+  if (captions.length === 0) {
     return (
       <div className="p-6 text-center">
         <h2 className="text-xl font-semibold text-neutral-900">
@@ -260,7 +260,9 @@ export default function AdminUserAssignPage() {
                     unoptimized
                   />
                   <div className="absolute top-2 left-2">
-                    {c.status === "REVIEWED" ? (
+                    {c.status === "APPROVED" ? (
+                      <Badge text="Approved" color="blue" />
+                    ) : c.status === "REVIEWED" ? (
                       <Badge text="Reviewed" color="emerald" />
                     ) : (
                       <Badge text="Captioned" color="gray" />
@@ -282,6 +284,7 @@ export default function AdminUserAssignPage() {
                 <div className="p-3 border-t border-neutral-200 flex items-center gap-2">
                   <Button
                     onClick={() => handleApprove(c.id)}
+                    disabled={c.status === "APPROVED"}
                     className="w-full bg-green-600 hover:bg-green-700"
                     size="sm"
                   >

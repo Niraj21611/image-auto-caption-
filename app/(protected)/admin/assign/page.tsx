@@ -55,7 +55,7 @@ function AssignmentForm({
           </SelectContent>
         </Select>
         {assignedUser && (
-          <Link href={`/admin/assign/${assignedUser.id}`} className="text-sm text-blue-600 hover:text-blue-700 hover:underline flex items-center gap-1">
+          <Link href={`/admin/assign/${jobId}`} className="text-sm text-blue-600 hover:text-blue-700 hover:underline flex items-center gap-1">
             View progress
             <ChevronRight className="w-3 h-3" />
           </Link>

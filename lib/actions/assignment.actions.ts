@@ -6,12 +6,6 @@ import { revalidatePath } from "next/cache";
 import * as fsp from "node:fs/promises";
 import path from "node:path";
 
-// Contract
-// - listCompletedJobs(): jobs ready to assign (COMPLETED or processed>=total)
-// - listUsers(): reviewers to assign to (role USER)
-// - assignJobAction(FormData): assign a job to a user (server action via <form>)
-// - getUserReviewStats(userId): totals for reviewed and pending for that user
-
 export async function listCompletedJobs() {
   // Return most recent first, include assigned user info for UI label
   const jobs = await prisma.imageJob.findMany({
@@ -170,7 +164,6 @@ export async function getProcessedCaptionsForUser(jobId: string) {
 
   try {
     const where: Prisma.ImageCaptionWhereInput = {
-      status: "REVIEWED",
       jobId,
     };
 
