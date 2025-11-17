@@ -16,6 +16,7 @@ enum ImageStatus {
     CAPTIONED
     REVIEWED
     APPROVED
+    FAILED
 }
 
 model User {

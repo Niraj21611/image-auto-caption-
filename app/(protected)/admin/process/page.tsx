@@ -33,6 +33,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { toast } from "sonner";
 
 type HistoryRow = {
   jobId: string;
@@ -77,8 +78,9 @@ export default function ProcessPage() {
         setJobId(res.data.jobId);
         setImageCount(res.data.total);
         setProgress({ processed: 0, total: res.data.total, status: "READY" });
+        toast.success("Preparation successfull")
       } else {
-        alert(res.error || "Failed to prepare job");
+        toast.error(res.error || "Failed to prepare job");
       }
     } finally {
       setIsPreparing(false);

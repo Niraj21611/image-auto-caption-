@@ -619,6 +619,7 @@ export async function analyzeDirectory(dirPath: string) {
 
 export async function getHistory(limit = 50) {
   try {
+    const openai = getOpenAIClient();
     const jobs = await prisma.imageJob.findMany({
       orderBy: { createdAt: "desc" },
       take: limit,
@@ -629,16 +630,96 @@ export async function getHistory(limit = 50) {
         totalImages: true,
         status: true,
         createdAt: true,
+        batchId: true,
       },
     });
-    const rows = jobs.map((j) => ({
-      jobId: j.id,
-      dirPath: j.dirPath,
-      status: j.status,
-      processed: j.processed,
-      total: j.totalImages,
-      createdAt: j.createdAt.toISOString(),
-    }));
+
+    const limiter = pLimit(3);
+
+    const rows = await Promise.all(
+      jobs.map((j) =>
+        limiter(async () => {
+          let status = j.status;
+          let processed = j.processed;
+          let failed = 0;
+          const total = j.totalImages;
+
+          const mapStatus = (s: string): string => {
+            switch (s) {
+              case "in_progress":
+              case "validating":
+              case "finalizing":
+                return "RUNNING";
+              case "completed":
+                return "COMPLETED";
+              case "failed":
+                return "FAILED";
+              case "cancelled":
+                return "CANCELLED";
+              default:
+                return status;
+            }
+          };
+
+          try {
+            if (j.batchId) {
+              const b = await openai.batches.retrieve(j.batchId);
+              const mapped = mapStatus(b.status);
+              if (mapped !== j.status) {
+                status = mapped;
+                await prisma.imageJob.update({ where: { id: j.id }, data: { status } });
+              }
+              if (b.status === "completed") {
+                const outputFileId = (b as unknown as { output_file_id?: string })?.output_file_id;
+                if (outputFileId) {
+                  const fileResp = await openai.files.content(outputFileId);
+                  const text = Buffer.from(await fileResp.arrayBuffer()).toString("utf8");
+                  const lines = text.split(/\r?\n/).filter(Boolean);
+                  let ok = 0;
+                  let bad = 0;
+                  for (const line of lines) {
+                    try {
+                      const obj = JSON.parse(line);
+                      const isError = !!obj?.error;
+                      const customId: string | undefined = obj?.custom_id;
+                      if (!customId) { bad += 1; continue; }
+                      if (isError) {
+                        bad += 1;
+                        continue;
+                      }
+                      const caption = extractTextFromResponse(obj?.response);
+                      await prisma.imageCaption.update({ where: { id: customId }, data: { preCaption: caption, status: "CAPTIONED" } });
+                      ok += 1;
+                    } catch {
+                      bad += 1;
+                    }
+                  }
+                  processed = ok;
+                  failed = bad;
+                  await prisma.imageJob.update({ where: { id: j.id }, data: { processed, failed, status: "COMPLETED" } });
+                  status = "COMPLETED";
+                }
+              } else if (b.status === "failed") {
+                status = "FAILED";
+                await prisma.imageJob.update({ where: { id: j.id }, data: { status } });
+              }
+            }
+          } catch {
+            // Swallow OpenAI errors for history rendering; leave DB values
+          }
+
+          return {
+            jobId: j.id,
+            dirPath: j.dirPath,
+            status,
+            processed,
+            total,
+            createdAt: j.createdAt.toISOString(),
+          };
+        })
+      )
+    );
+
     return { success: true, data: rows };
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
