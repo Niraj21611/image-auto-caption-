@@ -1,6 +1,6 @@
 "use client";
 
-import { Home, Users, Settings, LogOut } from "lucide-react";
+import { Home, Users, Settings, LogOut, UserPlus, Workflow, ClipboardCheck } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -36,11 +36,13 @@ export default function Sidebar() {
       ? [
           { title: "Dashboard", url: "/admin", icon: Home },
           { title: "User Management", url: "/admin/user", icon: Users },
+          { title: "Assign Batch", url: "/admin/assign", icon: UserPlus },
+          { title: "Process Batch", url: "/admin/process", icon: Workflow },
           { title: "Settings", url: "/admin/setting", icon: Settings },
         ]
       : [
           { title: "Dashboard", url: "/user", icon: Home },
-          { title: "My Profile", url: "/user/profile", icon: Users },
+          { title: "Review", url: "/user/review", icon: ClipboardCheck },
           { title: "Settings", url: "/user/setting", icon: Settings },
         ];
 
