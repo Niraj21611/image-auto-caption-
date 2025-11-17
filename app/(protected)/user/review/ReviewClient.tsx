@@ -33,7 +33,7 @@ interface ReviewClientProps {
   jobs: Job[];
   initialJob: Job;
   initialData: {
-    itemsRaw: ImageCaption[];
+    items: ImageCaption[];
     totalPending: number;
     page: number;
     pageSize: number;
@@ -45,12 +45,12 @@ export default function ReviewClient({
   initialData,
 }: ReviewClientProps) {
   const [selectedJob, setSelectedJob] = useState<Job>(initialJob);
-  const [captions, setCaptions] = useState<ImageCaption[]>(initialData.itemsRaw);
+  const [captions, setCaptions] = useState<ImageCaption[]>(initialData.items);
   const [currentPage, setCurrentPage] = useState(0);
   const [totalPending, setTotalPending] = useState(initialData.totalPending);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [postCaption, setPostCaption] = useState(
-    initialData.itemsRaw[0]?.postCaption || initialData.itemsRaw[0]?.preCaption || ""
+    initialData.items[0]?.postCaption || initialData.items[0]?.preCaption || ""
   );
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isLoadingPage, setIsLoadingPage] = useState(false);
@@ -58,7 +58,6 @@ export default function ReviewClient({
   const currentCaption = captions[selectedIndex];
   const totalPages = Math.ceil(totalPending / 10);
 
-  // Update postCaption when selectedIndex changes
   useEffect(() => {
     if (currentCaption) {
       setPostCaption(currentCaption.postCaption || currentCaption.preCaption);
@@ -69,12 +68,12 @@ export default function ReviewClient({
     setIsLoadingPage(true);
     try {
       const data = await getCaptionsPage(jobId, page, 10);
-      setCaptions(data.itemsRaw);
+      setCaptions(data.items);
       setTotalPending(data.totalPending);
       setCurrentPage(page);
       setSelectedIndex(0);
-      if (data.itemsRaw.length > 0) {
-        setPostCaption(data.itemsRaw[0].postCaption || data.itemsRaw[0].preCaption);
+      if (data.items.length > 0) {
+        setPostCaption(data.items[0].postCaption || data.items[0].preCaption);
       }
     } catch (err) {
       toast.error("Failed to load images");
@@ -104,14 +103,11 @@ export default function ReviewClient({
         }
         return next;
       });
-      // Decrease pending count optimistically
       setTotalPending((t) => Math.max(0, t - 1));
 
-      // Move to next image or reload page
       if (selectedIndex < captions.length - 1) {
         setSelectedIndex(selectedIndex + 1);
       } else {
-        // Reload current page to get fresh pending items
         await loadPage(currentPage, selectedJob.id);
       }
     } catch (err) {

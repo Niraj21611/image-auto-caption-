@@ -4,6 +4,37 @@ import prisma from "../prisma";
 import { revalidatePath } from "next/cache";
 import { getServerSession } from "next-auth";
 import { nextauthOptions } from "@/lib/auth";
+import { unstable_noStore as noStore } from "next/cache";
+import * as fsp from "node:fs/promises";
+import path from "node:path";
+
+function mimeFromExt(ext: string) {
+	switch (ext.toLowerCase()) {
+		case ".jpg":
+		case ".jpeg":
+			return "image/jpeg";
+		case ".png":
+			return "image/png";
+		case ".webp":
+			return "image/webp";
+		default:
+			return "application/octet-stream";
+	}
+}
+
+async function filePathToDataUrl(filePath: string) {
+	try {
+		const buf = await fsp.readFile(filePath);
+		const ext = path.extname(filePath);
+		const mime = mimeFromExt(ext);
+		const base64 = buf.toString("base64");
+		return `data:${mime};base64,${base64}`;
+	} catch {
+		return "data:application/octet-stream;base64,";
+	}
+}
+
+// (unused) previously used helper retained for reference
 
 
 export async function getUserAssignedJobs(userId: string) {
@@ -27,10 +58,9 @@ export async function getCaptionsPage(jobId: string, page = 0, pageSize = 10) {
 	const skip = Math.max(0, page) * Math.max(1, pageSize);
 	const take = Math.max(1, pageSize);
 
-	// Primary filter: by jobId
-
+	console.log("Job Id: ", jobId)
 	const itemsRaw = await prisma.imageCaption.findMany({
-		where: {jobId, status: "CAPTIONED"},
+		where: { jobId, status: "CAPTIONED"},
 		orderBy: { createdAt: "asc" },
 		skip,
 		take,
@@ -43,10 +73,40 @@ export async function getCaptionsPage(jobId: string, page = 0, pageSize = 10) {
 			createdAt: true,
 		},
 	});
-	const totalPending = await prisma.imageCaption.count({ where: {jobId, status: "CAPTIONED"} });
+
+	const totalPending = await prisma.imageCaption.count({ where: { jobId, status: "CAPTIONED" } });
+
+	const items = await Promise.all(
+		itemsRaw.map(async (it) => ({
+			...it,
+			src: await filePathToDataUrl(it.filePath),
+		}))
+	);
 
 
-	return { itemsRaw, totalPending, page, pageSize };
+	return { items, totalPending, page, pageSize };
+}
+
+// Summaries for all batches assigned to a user
+export async function getUserBatchSummaries(userId: string) {
+	if (!userId) throw new Error("userId is required");
+	const jobs = await prisma.imageJob.findMany({
+		where: { assignedTo: userId },
+		orderBy: { createdAt: "desc" },
+		select: { id: true, dirPath: true, totalImages: true, processed: true, reviewed: true, createdAt: true },
+	});
+
+	// For each job, compute available (CAPTIONED) and underReview (REVIEWED by this user)
+	const out = await Promise.all(
+		jobs.map(async (j) => {
+			const [available, underReview] = await Promise.all([
+				prisma.imageCaption.count({ where: { jobId: j.id, status: "CAPTIONED" } }),
+				prisma.imageCaption.count({ where: { jobId: j.id, status: "REVIEWED", reviewerId: userId } }),
+			]);
+			return { ...j, available, underReview };
+		})
+	);
+	return out;
 }
 
 // Form post server action

@@ -128,7 +128,7 @@ export default function UserAssignPage() {
         </div>
 
         {/* User Card */}
-        <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl p-6 border border-blue-200 mb-6">
+        <div className="bg-linear-to-br from-blue-50 to-indigo-50 rounded-xl p-6 border border-blue-200 mb-6">
           <div className="flex items-center gap-4">
             <div className="w-16 h-16 bg-blue-600 rounded-full flex items-center justify-center">
               {data.jobs[0].assignedUser?.name ||
@@ -219,7 +219,7 @@ export default function UserAssignPage() {
 
         {/* Jobs Table */}
         {data.jobs.length === 0 ? (
-          <div className="bg-gradient-to-br from-gray-50 to-gray-100 rounded-xl border-2 border-dashed border-gray-300 p-12">
+          <div className="bg-linear-to-br from-gray-50 to-gray-100 rounded-xl border-2 border-dashed border-gray-300 p-12">
             <div className="flex flex-col items-center justify-center text-center space-y-4">
               <div className="rounded-full bg-white p-6 shadow-md">
                 <FolderOpen className="w-16 h-16 text-gray-400" />
