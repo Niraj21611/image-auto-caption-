@@ -79,6 +79,7 @@ export default async function ReviewPage(props: {
       <BatchHeader summaries={summaries} selectedJobId={selectedJobId} />
 
       <ReviewClient
+        key={selectedJob.id}
         userId={userId}
         jobs={jobs}
         initialJob={selectedJob}

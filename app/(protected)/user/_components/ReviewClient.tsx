@@ -44,7 +44,6 @@ export default function ReviewClient({
   initialJob,
   initialData,
 }: ReviewClientProps) {
-  const [selectedJob, setSelectedJob] = useState<Job>(initialJob);
   const [captions, setCaptions] = useState<ImageCaption[]>(initialData.items);
   const [currentPage, setCurrentPage] = useState(0);
   const [totalPending, setTotalPending] = useState(initialData.totalPending);
@@ -57,6 +56,7 @@ export default function ReviewClient({
 
   const currentCaption = captions[selectedIndex];
   const totalPages = Math.ceil(totalPending / 10);
+  const selectedJob = initialJob;
 
   useEffect(() => {
     if (currentCaption) {
