@@ -13,21 +13,19 @@ import {
 } from "@/components/ui/table";
 import {
   FolderSearch,
-  Play,
   History,
   Sparkles,
   CheckCircle2,
   XCircle,
   Loader2,
-  StopCircle,
   HelpCircle,
+  Send,
 } from "lucide-react";
 import {
-  analyzeDirectory,
   getHistory as getHistoryAction,
-  getProgress,
-  startProcessing,
-  stopProcessing,
+  prepareAndUpload,
+  createCaptionBatch,
+  pollBatchAndIngest,
 } from "@/lib/actions/caption.actions";
 import {
   Tooltip,
@@ -36,20 +34,6 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 
-type ProgressResponse =
-  | {
-      success: true;
-      job: {
-        status: "idle" | "running" | "completed" | "failed" | "cancelled";
-        total: number;
-        processed: number;
-        dirPath: string;
-        startedAt?: number;
-        finishedAt?: number;
-        error?: string;
-      };
-    }
-  | { success: false; error: string };
 type HistoryRow = {
   jobId: string;
   dirPath: string;
@@ -61,47 +45,18 @@ type HistoryRow = {
 
 export default function ProcessPage() {
   const [dirPath, setDirPath] = useState("");
+  const [prompt, setPrompt] = useState("Write a concise, descriptive caption for this image.");
   const [jobId, setJobId] = useState<string | null>(null);
   const [imageCount, setImageCount] = useState<number | null>(null);
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [isStarting, setIsStarting] = useState(false);
-  const [isStopping, setIsStopping] = useState(false);
-  const [batchSize, setBatchSize] = useState<number>(2);
-  const [concurrency, setConcurrency] = useState<number>(1);
-  const [progress, setProgress] = useState<{
-    processed: number;
-    total: number;
-    status: string;
-    error?: string;
-    startedAt?: number;
-  } | null>(null);
+  const [isPreparing, setIsPreparing] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [progress, setProgress] = useState<{ processed: number; total: number; status: string } | null>(null);
   const [history, setHistory] = useState<HistoryRow[]>([]);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const pct = useMemo(() => {
     if (!progress || progress.total === 0) return 0;
     return Math.floor((progress.processed / progress.total) * 100);
-  }, [progress]);
-
-  const eta = useMemo(() => {
-    if (
-      !progress ||
-      !progress.startedAt ||
-      progress.processed === 0 ||
-      progress.status !== "running"
-    ) {
-      return null;
-    }
-    const elapsed = Date.now() - progress.startedAt;
-    const avgTimePerImage = elapsed / progress.processed;
-    const remaining = progress.total - progress.processed;
-    const etaMs = avgTimePerImage * remaining;
-    const etaSeconds = Math.ceil(etaMs / 1000);
-
-    if (etaSeconds < 60) return `${etaSeconds}s`;
-    const minutes = Math.floor(etaSeconds / 60);
-    const seconds = etaSeconds % 60;
-    return `${minutes}m ${seconds}s`;
   }, [progress]);
 
   const fetchHistory = useCallback(async () => {
@@ -113,117 +68,50 @@ export default function ProcessPage() {
     fetchHistory();
   }, [fetchHistory]);
 
-  const analyze = async () => {
+  const prepare = async () => {
     if (!dirPath) return;
-    setIsAnalyzing(true);
+    setIsPreparing(true);
     try {
-      const res = await analyzeDirectory(dirPath);
-      if (res.success && res.jobId && res.count) {
-        setJobId(res.jobId);
-        setImageCount(res.count);
-        setProgress({
-          processed: 0,
-          total: res.count,
-          status: "idle",
-          startedAt: undefined,
-        });
+      const res = await prepareAndUpload(dirPath);
+      if (res.success && res.data) {
+        setJobId(res.data.jobId);
+        setImageCount(res.data.total);
+        setProgress({ processed: 0, total: res.data.total, status: "READY" });
       } else {
-        alert(`Analyze error: ${res.error}`);
+        alert(res.error || "Failed to prepare job");
       }
     } finally {
-      setIsAnalyzing(false);
+      setIsPreparing(false);
     }
   };
 
-  const start = async () => {
+  const submit = async () => {
     if (!jobId) return;
-    setIsStarting(true);
+    setIsSubmitting(true);
     try {
-      const res = await startProcessing(jobId, batchSize, dirPath, concurrency);
+      const res = await createCaptionBatch(jobId, prompt);
       if (!res.success) {
-        alert(`Start error: ${res.error || "Unknown"}`);
+        alert(res.error || "Failed to create batch");
         return;
       }
-      // Start polling
       if (pollRef.current) clearInterval(pollRef.current);
       pollRef.current = setInterval(async () => {
-        const res = await getProgress(jobId, dirPath);
-        if (res.success && res.job) {
-          const j = res.job;
-          setProgress({
-            processed: j.processed,
-            total: j.total,
-            status: j.status,
-            error: j.error,
-            startedAt: j.startedAt,
-          });
-          if (
-            j.status === "completed" ||
-            j.status === "failed" ||
-            j.status === "cancelled"
-          ) {
+        const pr = await pollBatchAndIngest(jobId);
+        if (pr.success && pr.data) {
+          setProgress({ processed: pr.data.processed ?? 0, total: pr.data.total ?? 0, status: pr.data.status });
+          if (pr.data.status === "completed" || pr.data.status === "failed" || pr.data.status === "cancelled") {
             if (pollRef.current) {
               clearInterval(pollRef.current);
               pollRef.current = null;
             }
-            // Refresh history when processing is done
             await fetchHistory();
           }
         }
-      }, 1000); // Poll every 1 second for faster updates
+      }, 2000);
     } finally {
-      setIsStarting(false);
+      setIsSubmitting(false);
     }
   };
-
-  const stop = async () => {
-    if (!jobId) return;
-    setIsStopping(true);
-    try {
-      const res = await stopProcessing(jobId);
-      if (!res.success) {
-        alert(`Stop error: ${res.error || "Unknown"}`);
-      }
-    } finally {
-      setIsStopping(false);
-    }
-  };
-
-  useEffect(() => {
-    const onVis = () => {
-      if (
-        document.visibilityState === "visible" &&
-        jobId &&
-        progress?.status === "running"
-      ) {
-        getProgress(jobId, dirPath).then((res) => {
-          if (res.success && res.job) {
-            const j = res.job;
-            setProgress({
-              processed: j.processed,
-              total: j.total,
-              status: j.status,
-              error: j.error,
-              startedAt: j.startedAt,
-            });
-            if (
-              j.status === "completed" ||
-              j.status === "failed" ||
-              j.status === "cancelled"
-            ) {
-              if (pollRef.current) {
-                clearInterval(pollRef.current);
-                pollRef.current = null;
-              }
-              fetchHistory();
-            }
-          }
-        });
-      }
-    };
-    document.addEventListener("visibilitychange", onVis);
-    return () => document.removeEventListener("visibilitychange", onVis);
-  }, [jobId, progress?.status, fetchHistory, dirPath]);
 
   useEffect(() => {
     return () => {
@@ -237,12 +125,8 @@ export default function ProcessPage() {
         <div className="max-w-8xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center h-16">
             <div>
-              <h1 className="text-lg font-semibold text-foreground">
-                Image Caption Processor
-              </h1>
-              <p className="text-sm text-muted-foreground">
-                Batch-generate AI captions for your images
-              </p>
+              <h1 className="text-lg font-semibold text-foreground">Image Caption Processor</h1>
+              <p className="text-sm text-muted-foreground">Upload images to OpenAI, create a batch, and ingest results automatically</p>
             </div>
           </div>
         </div>
@@ -255,142 +139,38 @@ export default function ProcessPage() {
               <FolderSearch className="w-5 h-5 text-purple-600" />
             </div>
             <div>
-              <h3 className="text-sm font-semibold text-purple-900">
-                Directory Analysis
-              </h3>
-              <p className="text-xs text-purple-700 mt-0.5">
-                Select a local directory containing images (jpg, jpeg, png)
-              </p>
+              <h3 className="text-sm font-semibold text-purple-900">Directory & Prompt</h3>
+              <p className="text-xs text-purple-700 mt-0.5">Select a local directory containing images (jpg, jpeg, png, webp)</p>
             </div>
           </div>
 
-          <div className="grid grid-cols-1 gap-3 lg:grid-cols-[1fr_auto_auto_auto_auto_auto_auto] items-end">
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-[1fr]">
             <div className="space-y-2">
-              <label className="text-xs font-medium text-gray-700">
-                Directory Path
-              </label>
-              <div className="flex gap-2">
-                <Input
-                  placeholder="e.g. C:\Users\you\Pictures\album"
-                  value={dirPath}
-                  onChange={(e) => setDirPath(e.target.value)}
-                  className="h-11 bg-white border-purple-200 focus:border-purple-500 focus:ring-purple-500"
-                />
-              </div>
+              <label className="text-xs font-medium text-gray-700">Directory Path</label>
+              <Input placeholder="e.g. C:\\Users\\you\\Pictures\\album" value={dirPath} onChange={(e) => setDirPath(e.target.value)} className="h-11 bg-white border-purple-200 focus:border-purple-500 focus:ring-purple-500" />
             </div>
             <div className="space-y-2">
               <div className="flex items-center gap-1">
-                <label className="text-xs font-medium text-gray-700">
-                  Batch Size
-                </label>
+                <label className="text-xs font-medium text-gray-700">Caption Prompt</label>
                 <TooltipProvider>
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <HelpCircle className="w-3 h-3 text-gray-500 cursor-help" />
                     </TooltipTrigger>
-                    <TooltipContent className="max-w-xs">
-                      <p className="text-xs">
-                        Number of images sent per API request. Lower values
-                        reduce token usage and rate limits.
-                      </p>
-                    </TooltipContent>
+                    <TooltipContent className="max-w-xs"><p className="text-xs">Prompt given to the model for each image in the batch.</p></TooltipContent>
                   </Tooltip>
                 </TooltipProvider>
               </div>
-              <Input
-                type="number"
-                min={1}
-                max={10}
-                value={batchSize}
-                onChange={(e) =>
-                  setBatchSize(Math.max(1, Number(e.target.value) || 1))
-                }
-                className="h-11 w-24 bg-white border-purple-200 focus:border-purple-500 focus:ring-purple-500"
-              />
+              <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} className="min-h-24 p-3 rounded-md border bg-white border-purple-200 focus:border-purple-500 focus:ring-purple-500 outline-none" />
             </div>
-            <div className="space-y-2">
-              <div className="flex items-center gap-1">
-                <label className="text-xs font-medium text-gray-700">
-                  Concurrency
-                </label>
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <HelpCircle className="w-3 h-3 text-gray-500 cursor-help" />
-                    </TooltipTrigger>
-                    <TooltipContent className="max-w-xs">
-                      <p className="text-xs">
-                        Number of parallel batches. Start with 1 for
-                        rate-limited accounts.
-                      </p>
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-              </div>
-              <Input
-                type="number"
-                min={1}
-                max={6}
-                value={concurrency}
-                onChange={(e) =>
-                  setConcurrency(Math.max(1, Number(e.target.value) || 1))
-                }
-                className="h-11 w-24 bg-white border-purple-200 focus:border-purple-500 focus:ring-purple-500"
-              />
-            </div>
-            <Button
-              onClick={analyze}
-              disabled={!dirPath || isAnalyzing}
-              className="h-11 bg-purple-600 hover:bg-purple-700 text-white gap-2"
-            >
-              {isAnalyzing ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  Analyzing...
-                </>
-              ) : (
-                <>
-                  <FolderSearch className="w-4 h-4" />
-                  Analyze
-                </>
-              )}
-            </Button>
-            <Button
-              onClick={start}
-              disabled={!jobId || isStarting || progress?.status === "running"}
-              className="h-11 bg-green-600 hover:bg-green-700 text-white gap-2"
-            >
-              {isStarting ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  Starting...
-                </>
-              ) : (
-                <>
-                  <Play className="w-4 h-4" />
-                  {progress?.status === "cancelled" ? "Resume" : "Start"}
-                </>
-              )}
-            </Button>
-            {progress?.status === "running" && (
-              <Button
-                onClick={stop}
-                disabled={isStopping}
-                className="h-11 bg-red-600 hover:bg-red-700 text-white gap-2"
-              >
-                {isStopping ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    Stopping...
-                  </>
-                ) : (
-                  <>
-                    <StopCircle className="w-4 h-4" />
-                    Stop
-                  </>
-                )}
+            <div className="flex gap-3">
+              <Button onClick={prepare} disabled={!dirPath || isPreparing} className="h-11 bg-purple-600 hover:bg-purple-700 text-white gap-2">
+                {isPreparing ? (<><Loader2 className="w-4 h-4 animate-spin" /> Preparing...</>) : (<><FolderSearch className="w-4 h-4" /> Prepare</>)}
               </Button>
-            )}
+              <Button onClick={submit} disabled={!jobId || isSubmitting} className="h-11 bg-green-600 hover:bg-green-700 text-white gap-2">
+                {isSubmitting ? (<><Loader2 className="w-4 h-4 animate-spin" /> Submitting...</>) : (<><Send className="w-4 h-4" /> Create Batch</>)}
+              </Button>
+            </div>
           </div>
         </div>
 
@@ -399,12 +179,8 @@ export default function ProcessPage() {
             <div className="bg-linear-to-br from-blue-50 to-cyan-50 rounded-xl p-6 border border-blue-200 shadow-sm">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-xs font-medium text-blue-900 uppercase tracking-wide">
-                    Images Detected
-                  </p>
-                  <p className="text-3xl font-bold text-blue-700 mt-1">
-                    {imageCount}
-                  </p>
+                  <p className="text-xs font-medium text-blue-900 uppercase tracking-wide">Images Found</p>
+                  <p className="text-3xl font-bold text-blue-700 mt-1">{imageCount}</p>
                 </div>
                 <div className="w-14 h-14 bg-blue-100 rounded-full flex items-center justify-center">
                   <Sparkles className="w-7 h-7 text-blue-600" />
@@ -413,103 +189,30 @@ export default function ProcessPage() {
             </div>
 
             {progress && (
-              <div
-                className={`bg-linear-to-br rounded-xl p-6 border shadow-sm ${
-                  progress.status === "completed"
-                    ? "from-green-50 to-emerald-50 border-green-200"
-                    : progress.status === "failed"
-                    ? "from-red-50 to-pink-50 border-red-200"
-                    : progress.status === "running"
-                    ? "from-orange-50 to-amber-50 border-orange-200"
-                    : "from-gray-50 to-slate-50 border-gray-200"
-                }`}
-              >
+              <div className={`bg-linear-to-br rounded-xl p-6 border shadow-sm ${progress.status === "completed" ? "from-green-50 to-emerald-50 border-green-200" : progress.status === "failed" ? "from-red-50 to-pink-50 border-red-200" : progress.status === "BATCH_SUBMITTED" || progress.status === "in_progress" || progress.status === "READY" ? "from-orange-50 to-amber-50 border-orange-200" : "from-gray-50 to-slate-50 border-gray-200"}`}>
                 <div className="flex items-center justify-between mb-3">
                   <div>
                     <p className="text-xs font-medium uppercase tracking-wide flex items-center gap-2">
                       {progress.status === "completed" ? (
-                        <>
-                          <CheckCircle2 className="w-4 h-4 text-green-600" />
-                          <span className="text-green-900">Completed</span>
-                        </>
+                        <><CheckCircle2 className="w-4 h-4 text-green-600" /><span className="text-green-900">Completed</span></>
                       ) : progress.status === "failed" ? (
-                        <>
-                          <XCircle className="w-4 h-4 text-red-600" />
-                          <span className="text-red-900">Failed</span>
-                        </>
-                      ) : progress.status === "running" ? (
-                        <>
-                          <Loader2 className="w-4 h-4 text-orange-600 animate-spin" />
-                          <span className="text-orange-900">Processing</span>
-                        </>
+                        <><XCircle className="w-4 h-4 text-red-600" /><span className="text-red-900">Failed</span></>
                       ) : (
-                        <span className="text-gray-900">Idle</span>
+                        <><Loader2 className="w-4 h-4 text-orange-600 animate-spin" /><span className="text-orange-900">Processing</span></>
                       )}
                     </p>
-                    <p
-                      className={`text-2xl font-bold mt-1 ${
-                        progress.status === "completed"
-                          ? "text-green-700"
-                          : progress.status === "failed"
-                          ? "text-red-700"
-                          : progress.status === "running"
-                          ? "text-orange-700"
-                          : "text-gray-700"
-                      }`}
-                    >
+                    <p className={`text-2xl font-bold mt-1 ${progress.status === "completed" ? "text-green-700" : progress.status === "failed" ? "text-red-700" : "text-orange-700"}`}>
                       {progress.processed}/{progress.total}
                     </p>
-                    {eta && progress.status === "running" && (
-                      <p className="text-xs text-orange-600 mt-1 font-medium">
-                        ETA: {eta}
-                      </p>
-                    )}
                   </div>
-                  <div
-                    className={`w-14 h-14 rounded-full flex items-center justify-center text-xl font-bold ${
-                      progress.status === "completed"
-                        ? "bg-green-100 text-green-700"
-                        : progress.status === "failed"
-                        ? "bg-red-100 text-red-700"
-                        : progress.status === "running"
-                        ? "bg-orange-100 text-orange-700"
-                        : "bg-gray-100 text-gray-700"
-                    }`}
-                  >
+                  <div className={`w-14 h-14 rounded-full flex items-center justify-center text-xl font-bold ${progress.status === "completed" ? "bg-green-100 text-green-700" : progress.status === "failed" ? "bg-red-100 text-red-700" : "bg-orange-100 text-orange-700"}`}>
                     {pct}%
                   </div>
                 </div>
                 <div className="space-y-2">
-                  <div
-                    className={`h-2.5 w-full rounded-full ${
-                      progress.status === "completed"
-                        ? "bg-green-100"
-                        : progress.status === "failed"
-                        ? "bg-red-100"
-                        : progress.status === "running"
-                        ? "bg-orange-100"
-                        : "bg-gray-100"
-                    }`}
-                  >
-                    <div
-                      className={`h-2.5 rounded-full transition-all duration-500 ${
-                        progress.status === "completed"
-                          ? "bg-green-600"
-                          : progress.status === "failed"
-                          ? "bg-red-600"
-                          : progress.status === "running"
-                          ? "bg-orange-600"
-                          : "bg-gray-600"
-                      }`}
-                      style={{ width: `${pct}%` }}
-                    />
+                  <div className={`h-2.5 w-full rounded-full ${progress.status === "completed" ? "bg-green-100" : progress.status === "failed" ? "bg-red-100" : "bg-orange-100"}`}>
+                    <div className={`h-2.5 rounded-full transition-all duration-500 ${progress.status === "completed" ? "bg-green-600" : progress.status === "failed" ? "bg-red-600" : "bg-orange-600"}`} style={{ width: `${pct}%` }} />
                   </div>
-                  {progress.error && (
-                    <div className="flex items-start gap-2 text-xs text-red-700 bg-red-50 p-2 rounded-lg border border-red-200">
-                      <XCircle className="w-4 h-4 shrink-0 mt-0.5" />
-                      <span>{progress.error}</span>
-                    </div>
-                  )}
                 </div>
               </div>
             )}
@@ -520,9 +223,7 @@ export default function ProcessPage() {
           <div className="px-6 py-4 border-b border-gray-200 bg-linear-to-r from-gray-50 to-slate-50">
             <div className="flex items-center gap-2">
               <History className="w-5 h-5 text-gray-600" />
-              <h3 className="text-sm font-semibold text-gray-900">
-                Processing History
-              </h3>
+              <h3 className="text-sm font-semibold text-gray-900">Processing History</h3>
             </div>
           </div>
 
@@ -530,18 +231,10 @@ export default function ProcessPage() {
             <Table>
               <TableHeader>
                 <TableRow className="bg-gray-50 hover:bg-gray-50">
-                  <TableHead className="font-semibold text-gray-700 py-3 px-6">
-                    Directory Path
-                  </TableHead>
-                  <TableHead className="font-semibold text-gray-700 w-28 text-center py-3 px-6">
-                    Status
-                  </TableHead>
-                  <TableHead className="font-semibold text-gray-700 w-40 text-center py-3 px-6">
-                    Progress
-                  </TableHead>
-                  <TableHead className="font-semibold text-gray-700 w-48 text-right py-3 px-6">
-                    Started
-                  </TableHead>
+                  <TableHead className="font-semibold text-gray-700 py-3 px-6">Directory Path</TableHead>
+                  <TableHead className="font-semibold text-gray-700 w-28 text-center py-3 px-6">Status</TableHead>
+                  <TableHead className="font-semibold text-gray-700 w-40 text-center py-3 px-6">Progress</TableHead>
+                  <TableHead className="font-semibold text-gray-700 w-48 text-right py-3 px-6">Started</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -549,15 +242,9 @@ export default function ProcessPage() {
                   <TableRow className="hover:bg-transparent">
                     <TableCell colSpan={4} className="py-12 px-6">
                       <div className="flex flex-col items-center justify-center text-center">
-                        <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-3">
-                          <History className="w-8 h-8 text-gray-400" />
-                        </div>
-                        <p className="text-sm font-medium text-gray-900">
-                          No processing history yet
-                        </p>
-                        <p className="text-xs text-gray-500 mt-1">
-                          Start analyzing directories to see history here
-                        </p>
+                        <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-3"><History className="w-8 h-8 text-gray-400" /></div>
+                        <p className="text-sm font-medium text-gray-900">No processing history yet</p>
+                        <p className="text-xs text-gray-500 mt-1">Start preparing a batch to see history here</p>
                       </div>
                     </TableCell>
                   </TableRow>
@@ -571,58 +258,28 @@ export default function ProcessPage() {
                     const diffDays = Math.floor(diffHours / 24);
 
                     let timeAgo = "";
-                    if (diffDays > 0) {
-                      timeAgo = `${diffDays}d ago`;
-                    } else if (diffHours > 0) {
-                      timeAgo = `${diffHours}h ago`;
-                    } else if (diffMins > 0) {
-                      timeAgo = `${diffMins}m ago`;
-                    } else {
-                      timeAgo = "Just now";
-                    }
+                    if (diffDays > 0) timeAgo = `${diffDays}d ago`;
+                    else if (diffHours > 0) timeAgo = `${diffHours}h ago`;
+                    else if (diffMins > 0) timeAgo = `${diffMins}m ago`;
+                    else timeAgo = "Just now";
 
                     return (
-                      <TableRow
-                        key={`${h.jobId}`}
-                        className="hover:bg-blue-50/50 transition-colors"
-                      >
-                        <TableCell className="font-mono text-xs sm:text-sm break-all py-4 px-6 text-gray-700">
-                          {h.dirPath}
-                        </TableCell>
+                      <TableRow key={`${h.jobId}`} className="hover:bg-blue-50/50 transition-colors">
+                        <TableCell className="font-mono text-xs sm:text-sm break-all py-4 px-6 text-gray-700">{h.dirPath}</TableCell>
                         <TableCell className="text-center py-4 px-6">
-                          <span
-                            className={`inline-flex items-center justify-center px-3 py-1 rounded-full text-xs font-semibold
-                            ${
-                              h.status === "COMPLETED"
-                                ? "bg-green-100 text-green-700"
-                                : h.status === "RUNNING"
-                                ? "bg-orange-100 text-orange-700"
-                                : h.status === "FAILED"
-                                ? "bg-red-100 text-red-700"
-                                : "bg-gray-100 text-gray-700"
-                            }`}
-                          >
+                          <span className={`inline-flex items-center justify-center px-3 py-1 rounded-full text-xs font-semibold
+                            ${h.status === "COMPLETED" ? "bg-green-100 text-green-700" : h.status === "RUNNING" ? "bg-orange-100 text-orange-700" : h.status === "FAILED" ? "bg-red-100 text-red-700" : "bg-gray-100 text-gray-700"}
+                          `}>
                             {h.status}
                           </span>
                         </TableCell>
                         <TableCell className="text-center py-4 px-6">
-                          <span className="inline-flex items-center justify-center px-3 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-700">
-                            {h.processed}/{h.total}
-                          </span>
+                          <span className="inline-flex items-center justify-center px-3 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-700">{h.processed}/{h.total}</span>
                         </TableCell>
                         <TableCell className="text-right py-4 px-6">
                           <div className="flex flex-col items-end">
-                            <span className="text-xs font-medium text-gray-700">
-                              {timeAgo}
-                            </span>
-                            <span className="text-xs text-gray-500">
-                              {processedDate.toLocaleString("en-US", {
-                                month: "short",
-                                day: "numeric",
-                                hour: "2-digit",
-                                minute: "2-digit",
-                              })}
-                            </span>
+                            <span className="text-xs font-medium text-gray-700">{timeAgo}</span>
+                            <span className="text-xs text-gray-500">{processedDate.toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
                           </div>
                         </TableCell>
                       </TableRow>

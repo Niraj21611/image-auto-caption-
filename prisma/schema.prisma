@@ -45,31 +45,41 @@ model UserActivity {
 }
 
 model ImageJob {
-    id           String         @id @default(auto()) @map("_id") @db.ObjectId
-    dirPath      String
-    totalImages  Int
-    reviewed     Int            @default(0)
-    processed    Int            @default(0)
-    failed       Int            @default(0)
-    status       String         @default("RUNNING")
-    assignedTo   String?        @db.ObjectId
-    assignedUser User?          @relation(fields: [assignedTo], references: [id])
-    createdAt    DateTime       @default(now())
-    updatedAt    DateTime       @updatedAt
+    id          String  @id @default(auto()) @map("_id") @db.ObjectId
+    dirPath     String
+    totalImages Int
+    reviewed    Int     @default(0)
+    processed   Int     @default(0)
+    failed      Int     @default(0)
+    status      String  @default("RUNNING")
+    batchId     String?
+
+    assignedTo   String? @db.ObjectId
+    assignedUser User?   @relation(fields: [assignedTo], references: [id])
+
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+
     ImageCaption ImageCaption[]
 }
 
 model ImageCaption {
-    id          String      @id @default(auto()) @map("_id") @db.ObjectId
-    filePath    String      @unique
+    id String @id @default(auto()) @map("_id") @db.ObjectId
+
+    filePath     String  @unique
+    openaiFileId String?
+
     status      ImageStatus @default(CAPTIONED)
     preCaption  String
     postCaption String?
-    reviewerId  String?     @db.ObjectId
-    reviewer    User?       @relation(fields: [reviewerId], references: [id])
-    jobId       String?     @db.ObjectId
-    Job         ImageJob?   @relation(fields: [jobId], references: [id])
-    reviewedAt  DateTime?
-    createdAt DateTime @default(now())
-    updatedAt DateTime @updatedAt
+
+    reviewerId String? @db.ObjectId
+    reviewer   User?   @relation(fields: [reviewerId], references: [id])
+
+    jobId String?   @db.ObjectId
+    Job   ImageJob? @relation(fields: [jobId], references: [id])
+
+    reviewedAt DateTime?
+    createdAt  DateTime  @default(now())
+    updatedAt  DateTime  @updatedAt
 }

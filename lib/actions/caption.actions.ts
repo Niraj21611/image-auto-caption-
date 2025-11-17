@@ -5,6 +5,8 @@ import fs from "fs";
 import path from "path";
 import os from "os";
 import { Worker } from "node:worker_threads";
+import OpenAI from "openai";
+import pLimit from "p-limit";
 // import { randomUUID } from "crypto";
 
 type JobStatus = "idle" | "running" | "completed" | "failed" | "cancelled";
@@ -24,7 +26,7 @@ interface JobState {
 
 const jobs: Map<string, JobState> = new Map();
 
-const IMAGE_EXTS = new Set([".jpg", ".jpeg", ".png"]);
+const IMAGE_EXTS = new Set([".jpg", ".jpeg", ".png", ".webp"]);
 
 async function listImagesRecursive(root: string): Promise<string[]> {
   const out: string[] = [];
@@ -516,5 +518,220 @@ export async function getHistory(limit = 50) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error("getHistory error:", msg);
     return { success: false, error: msg || "Failed to fetch history" };
+  }
+}
+
+// --------------------
+// New OpenAI Batch Flow
+// --------------------
+
+function getOpenAIClient() {
+  const apiKey = process.env.OPENAI_API_KEY || "";
+  if (!apiKey) throw new Error("OPENAI_API_KEY is not set");
+  return new OpenAI({ apiKey });
+}
+
+
+export async function prepareAndUpload(dirPath: string) {
+  try {
+    if (!dirPath) return { success: false, error: "Path is required" };
+    const stats = await fs.promises.stat(dirPath).catch(() => null);
+    if (!stats || !stats.isDirectory()) {
+      return { success: false, error: "Provided path is not a directory or not accessible" };
+    }
+
+    const images = await listImagesRecursive(dirPath);
+    const job = await prisma.imageJob.create({
+      data: {
+        dirPath,
+        totalImages: images.length,
+        processed: 0,
+        failed: 0,
+        status: "UPLOADING",
+      },
+      select: { id: true },
+    });
+
+    const openai = getOpenAIClient();
+    const limit = pLimit(3);
+
+    let uploaded = 0;
+    const tasks = images.map((filePath) => limit(async () => {
+      // Ensure ImageCaption row exists first
+      const existing = await prisma.imageCaption.findUnique({ where: { filePath }, select: { id: true } });
+      let capId: string;
+      if (!existing) {
+        const created = await prisma.imageCaption.create({
+          data: { filePath, preCaption: "", postCaption: null, jobId: job.id },
+          select: { id: true },
+        });
+        capId = created.id;
+      } else {
+        // Attach to job if not set
+        await prisma.imageCaption.update({ where: { filePath }, data: { jobId: job.id } });
+        capId = existing.id;
+      }
+
+      // Upload file to OpenAI Files
+      try {
+        const file = await openai.files.create({ file: fs.createReadStream(filePath), purpose: "assistants" });
+        await prisma.imageCaption.update({ where: { id: capId }, data: { openaiFileId: file.id } });
+        uploaded += 1;
+      } catch {
+        // If upload fails, record as failed but continue
+        await prisma.imageJob.update({ where: { id: job.id }, data: { failed: { increment: 1 } } });
+      }
+    }));
+
+    await Promise.all(tasks);
+
+    await prisma.imageJob.update({ where: { id: job.id }, data: { status: "READY" } });
+
+    return { success: true, data: { jobId: job.id, total: images.length, uploaded } };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { success: false, error: msg };
+  }
+}
+
+export async function createCaptionBatch(jobId: string, prompt: string, model = process.env.OPENAI_MODEL || "gpt-4o-mini") {
+  try {
+    if (!jobId) return { success: false, error: "jobId is required" };
+    const job = await prisma.imageJob.findUnique({ where: { id: jobId } });
+    if (!job) return { success: false, error: "Job not found" };
+
+    const captions = await prisma.imageCaption.findMany({
+      where: { jobId, openaiFileId: { not: null } },
+      select: { id: true, openaiFileId: true },
+    });
+    if (captions.length === 0) return { success: false, error: "No images uploaded for batch" };
+
+    const tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "jsonl-"));
+    const jsonlPath = path.join(tmpDir, `batch-${jobId}.jsonl`);
+
+    const lines = captions.map((c) => {
+      const body = {
+        model,
+        input: [
+          {
+            role: "user",
+            content: [
+              { type: "input_text", text: prompt || "Write a concise, descriptive caption for this image." },
+              { type: "input_image", image_url: { file_id: c.openaiFileId } },
+            ],
+          },
+        ],
+        max_output_tokens: 300,
+      };
+      return JSON.stringify({
+        custom_id: c.id,
+        method: "POST",
+        url: "/v1/responses",
+        body,
+      });
+    });
+
+    await fs.promises.writeFile(jsonlPath, lines.join("\n"), "utf8");
+
+    const openai = getOpenAIClient();
+  const uploaded = await openai.files.create({ file: fs.createReadStream(jsonlPath), purpose: "batch" });
+    const batch = await openai.batches.create({ input_file_id: uploaded.id, endpoint: "/v1/responses", completion_window: "24h" });
+
+    await prisma.imageJob.update({ where: { id: jobId }, data: { batchId: batch.id, status: "BATCH_SUBMITTED" } });
+
+    return { success: true, data: { batchId: batch.id } };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { success: false, error: msg };
+  }
+}
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+function extractTextFromResponse(resp: unknown): string {
+  try {
+    const r = resp as Record<string, unknown> | undefined;
+    // New SDK may include convenience field
+    if (r && typeof (r as any).output_text === "string") return String((r as any).output_text);
+    const output = (r as any)?.output;
+    if (Array.isArray(output)) {
+      for (const item of output) {
+        const content = (item as any)?.content;
+        if (Array.isArray(content)) {
+          for (const part of content) {
+            const p: any = part;
+            if (p?.type === "output_text" && typeof p?.text === "string") return p.text;
+            if (p?.type === "text" && typeof p?.text === "string") return p.text;
+          }
+        }
+      }
+    }
+  } catch {}
+  return "";
+}
+/* eslint-enable @typescript-eslint/no-explicit-any */
+
+export async function pollBatchAndIngest(jobId: string) {
+  try {
+    if (!jobId) return { success: false, error: "jobId is required" };
+    const job = await prisma.imageJob.findUnique({ where: { id: jobId } });
+    if (!job) return { success: false, error: "Job not found" };
+    if (!job.batchId) return { success: false, error: "Batch not created yet" };
+
+    const openai = getOpenAIClient();
+    const batch = await openai.batches.retrieve(job.batchId);
+
+    if (batch.status === "completed") {
+      // If already completed and previously ingested, short-circuit
+      if (job.status === "COMPLETED") {
+        return { success: true, data: { status: "completed", processed: job.processed, failed: job.failed, total: job.totalImages } };
+      }
+
+  const outputFileId = (batch as unknown as { output_file_id?: string })?.output_file_id;
+      if (!outputFileId) return { success: false, error: "No output file on completed batch" };
+
+      const fileResp = await openai.files.content(outputFileId as string);
+      // node Response to string
+      const text = Buffer.from(await fileResp.arrayBuffer()).toString("utf8");
+      const lines = text.split(/\r?\n/).filter(Boolean);
+
+      let ok = 0;
+      let bad = 0;
+      for (const line of lines) {
+        try {
+          const obj = JSON.parse(line);
+          if (obj.error) {
+            bad += 1;
+            continue;
+          }
+          const customId: string = obj.custom_id;
+          const resp = obj.response;
+          const caption = extractTextFromResponse(resp);
+          if (customId && typeof caption === "string") {
+            const existing = await prisma.imageCaption.findUnique({ where: { id: customId }, select: { preCaption: true } });
+            if (!existing || (existing && !existing.preCaption)) {
+              await prisma.imageCaption.update({ where: { id: customId }, data: { preCaption: caption } });
+            }
+            ok += 1;
+          } else {
+            bad += 1;
+          }
+        } catch {
+          bad += 1;
+        }
+      }
+
+      const processed = ok;
+      const failed = bad;
+      const newStatus = processed + failed >= (job.totalImages || 0) ? "COMPLETED" : "PARTIAL";
+      await prisma.imageJob.update({ where: { id: jobId }, data: { processed, failed, status: newStatus } });
+
+      return { success: true, data: { status: "completed", processed, failed, total: job.totalImages } };
+    }
+
+    // Non-terminal states pass through
+    return { success: true, data: { status: batch.status, processed: job.processed, failed: job.failed, total: job.totalImages } };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { success: false, error: msg };
   }
 }
