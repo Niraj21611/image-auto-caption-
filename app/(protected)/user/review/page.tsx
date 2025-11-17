@@ -5,8 +5,8 @@ import {
 } from "@/lib/actions/review.actions";
 import { getServerSession } from "next-auth";
 import { nextauthOptions } from "@/lib/auth";
-import ReviewClient from "./ReviewClient";
-import Link from "next/link";
+import ReviewClient from "../_components/ReviewClient";
+import BatchHeader from "../_components/BatchHeader";
 
 export default async function ReviewPage(props: {
   searchParams: Promise<{ jobId?: string }>;
@@ -62,34 +62,7 @@ export default async function ReviewPage(props: {
   if (initialData.items.length === 0) {
     return (
       <div className="flex flex-col min-h-screen">
-        {/* BATCH HEADER */}
-        <div className="sticky top-0 z-40 bg-white border-b border-border">
-          <div className="max-w-7xl mx-auto px-6 py-4">
-            <h1 className="text-lg font-semibold">Your Assigned Batches</h1>
-
-            <div className="mt-3 flex flex-wrap gap-2">
-              {summaries.map((s) => (
-                <Link
-                  key={s.id}
-                  href={`/user/review?jobId=${s.id}`}
-                  className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-md border text-sm ${
-                    s.id === selectedJobId
-                      ? "bg-blue-600 text-white border-blue-600"
-                      : "bg-white text-neutral-800 border-neutral-200 hover:border-blue-300"
-                  }`}
-                >
-                  {s.dirPath.split(/[\\/]/).pop() || s.dirPath}
-                  <span className="text-xs opacity-80">
-                    Avail: {s.available}
-                  </span>
-                  <span className="text-xs opacity-80">
-                    Your Reviewed: {s.underReview}
-                  </span>
-                </Link>
-              ))}
-            </div>
-          </div>
-        </div>
+        <BatchHeader summaries={summaries} selectedJobId={selectedJobId} />
 
         <div className="flex-1 flex items-center justify-center p-6">
           <div className="text-center space-y-4">
@@ -103,31 +76,7 @@ export default async function ReviewPage(props: {
 
   return (
     <div className="flex flex-col min-h-screen">
-      <div className="sticky top-0 z-40 bg-white border-b border-border">
-        <div className="max-w-7xl mx-auto px-6 py-4">
-          <h1 className="text-lg font-semibold">Your Assigned Batches</h1>
-
-          <div className="mt-3 flex flex-wrap gap-2">
-            {summaries.map((s) => (
-              <Link
-                key={s.id}
-                href={`/user/review?jobId=${s.id}`}
-                className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-md border text-sm ${
-                  s.id === selectedJobId
-                    ? "bg-blue-600 text-white border-blue-600"
-                    : "bg-white text-neutral-800 border-neutral-200 hover:border-blue-300"
-                }`}
-              >
-                {s.dirPath.split(/[\\/]/).pop() || s.dirPath}
-                <span className="text-xs opacity-80">Avail: {s.available}</span>
-                <span className="text-xs opacity-80">
-                  Your Reviewed: {s.underReview}
-                </span>
-              </Link>
-            ))}
-          </div>
-        </div>
-      </div>
+      <BatchHeader summaries={summaries} selectedJobId={selectedJobId} />
 
       <ReviewClient
         userId={userId}
