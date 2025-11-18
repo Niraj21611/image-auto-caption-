@@ -667,13 +667,20 @@ export async function getHistory(limit = 50) {
               const mapped = mapStatus(b.status);
               if (mapped !== j.status) {
                 status = mapped;
-                await prisma.imageJob.update({ where: { id: j.id }, data: { status } });
+                await prisma.imageJob.update({
+                  where: { id: j.id },
+                  data: { status },
+                });
               }
               if (b.status === "completed") {
-                const outputFileId = (b as unknown as { output_file_id?: string })?.output_file_id;
+                const outputFileId = (
+                  b as unknown as { output_file_id?: string }
+                )?.output_file_id;
                 if (outputFileId) {
                   const fileResp = await openai.files.content(outputFileId);
-                  const text = Buffer.from(await fileResp.arrayBuffer()).toString("utf8");
+                  const text = Buffer.from(
+                    await fileResp.arrayBuffer()
+                  ).toString("utf8");
                   const lines = text.split(/\r?\n/).filter(Boolean);
                   let ok = 0;
                   let bad = 0;
@@ -682,13 +689,19 @@ export async function getHistory(limit = 50) {
                       const obj = JSON.parse(line);
                       const isError = !!obj?.error;
                       const customId: string | undefined = obj?.custom_id;
-                      if (!customId) { bad += 1; continue; }
+                      if (!customId) {
+                        bad += 1;
+                        continue;
+                      }
                       if (isError) {
                         bad += 1;
                         continue;
                       }
                       const caption = extractTextFromResponse(obj?.response);
-                      await prisma.imageCaption.update({ where: { id: customId }, data: { preCaption: caption, status: "CAPTIONED" } });
+                      await prisma.imageCaption.update({
+                        where: { id: customId },
+                        data: { preCaption: caption, status: "CAPTIONED" },
+                      });
                       ok += 1;
                     } catch {
                       bad += 1;
@@ -696,12 +709,18 @@ export async function getHistory(limit = 50) {
                   }
                   processed = ok;
                   failed = bad;
-                  await prisma.imageJob.update({ where: { id: j.id }, data: { processed, failed, status: "COMPLETED" } });
+                  await prisma.imageJob.update({
+                    where: { id: j.id },
+                    data: { processed, failed, status: "COMPLETED" },
+                  });
                   status = "COMPLETED";
                 }
               } else if (b.status === "failed") {
                 status = "FAILED";
-                await prisma.imageJob.update({ where: { id: j.id }, data: { status } });
+                await prisma.imageJob.update({
+                  where: { id: j.id },
+                  data: { status },
+                });
               }
             }
           } catch {
@@ -793,7 +812,7 @@ export async function prepareAndUpload(dirPath: string) {
         try {
           const file = await openai.files.create({
             file: fs.createReadStream(filePath),
-            purpose: "assistants",
+            purpose: "vision",
           });
           await prisma.imageCaption.update({
             where: { id: capId },
@@ -869,8 +888,8 @@ export async function createCaptionBatch(
                     "Write a concise, descriptive caption for this image.",
                 },
                 {
-                  type: "input_image",
-                  image_url: `openai://${c.openaiFileId}`, // ✅ FIXED
+                  type: "input_image_url",
+                  image_url: c.openaiFileId,
                 },
               ],
             },
