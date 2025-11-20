@@ -15,7 +15,6 @@ import {
   Image as ImageIcon,
   Clock,
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
 
 async function AdminPage() {
   const session = await getServerSession(nextauthOptions);
@@ -60,35 +59,26 @@ async function AdminPage() {
               </p>
             </div>
             <div className="flex items-center gap-2">
-              <Link href="/admin/process">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="gap-2 border-blue-200 hover:bg-blue-50 hover:border-blue-300"
-                >
-                  <PlayCircle className="h-4 w-4 text-blue-600" />
-                  <span className="text-blue-700 font-medium">Process Batch</span>
-                </Button>
+              <Link
+                href="/admin/process"
+                className="inline-flex items-center gap-2 rounded-md border border-blue-200 bg-white px-3 py-2 text-sm font-medium text-blue-700 transition hover:border-blue-300 hover:bg-blue-50"
+              >
+                <PlayCircle className="h-4 w-4 text-blue-600" />
+                <span>Process Batch</span>
               </Link>
-              <Link href="/admin/assign">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="gap-2 border-purple-200 hover:bg-purple-50 hover:border-purple-300"
-                >
-                  <UserCheck className="h-4 w-4 text-purple-600" />
-                  <span className="text-purple-700 font-medium">Assign Batches</span>
-                </Button>
+              <Link
+                href="/admin/assign"
+                className="inline-flex items-center gap-2 rounded-md border border-purple-200 bg-white px-3 py-2 text-sm font-medium text-purple-700 transition hover:border-purple-300 hover:bg-purple-50"
+              >
+                <UserCheck className="h-4 w-4 text-purple-600" />
+                <span>Assign Batches</span>
               </Link>
-              <Link href="/admin/user">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="gap-2 border-teal-200 hover:bg-teal-50 hover:border-teal-300"
-                >
-                  <Users className="h-4 w-4 text-teal-600" />
-                  <span className="text-teal-700 font-medium">Manage Users</span>
-                </Button>
+              <Link
+                href="/admin/user"
+                className="inline-flex items-center gap-2 rounded-md border border-teal-200 bg-white px-3 py-2 text-sm font-medium text-teal-700 transition hover:border-teal-300 hover:bg-teal-50"
+              >
+                <Users className="h-4 w-4 text-teal-600" />
+                <span>Manage Users</span>
               </Link>
             </div>
           </div>
@@ -96,8 +86,7 @@ async function AdminPage() {
       </div>
 
       <div className="px-6 pb-6 space-y-8">
-
-      {/* Stats Grid */}
+        {/* Stats Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         {/* Total Users */}
         <Link
@@ -302,7 +291,7 @@ async function AdminPage() {
                 </tr>
               </thead>
               <tbody>
-                {stats.recentBatches.map((batch) => (
+                {stats.recentBatches.map((batch: typeof stats.recentBatches[number]) => (
                   <tr
                     key={batch.id}
                     className="border-b border-slate-100 hover:bg-slate-50 transition-colors"

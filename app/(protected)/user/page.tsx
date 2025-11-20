@@ -13,7 +13,6 @@ import {
   AlertCircle,
   TrendingUp,
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
 
 async function UserPage() {
   const session = await getServerSession(nextauthOptions);
@@ -54,25 +53,19 @@ async function UserPage() {
               </p>
             </div>
             <div className="flex items-center gap-2">
-              <Link href="/user/review">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="gap-2 border-indigo-200 hover:bg-indigo-50 hover:border-indigo-300"
-                >
-                  <CheckCircle2 className="h-4 w-4 text-indigo-600" />
-                  <span className="text-indigo-700 font-medium">Review Images</span>
-                </Button>
+              <Link
+                href="/user/review"
+                className="inline-flex items-center gap-2 rounded-md border border-indigo-200 bg-white px-3 py-2 text-sm font-medium text-indigo-700 transition hover:border-indigo-300 hover:bg-indigo-50"
+              >
+                <CheckCircle2 className="h-4 w-4 text-indigo-600" />
+                <span>Review Images</span>
               </Link>
-              <Link href="/user/review">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="gap-2 border-purple-200 hover:bg-purple-50 hover:border-purple-300"
-                >
-                  <FolderKanban className="h-4 w-4 text-purple-600" />
-                  <span className="text-purple-700 font-medium">My Assignments</span>
-                </Button>
+              <Link
+                href="/user/review"
+                className="inline-flex items-center gap-2 rounded-md border border-purple-200 bg-white px-3 py-2 text-sm font-medium text-purple-700 transition hover:border-purple-300 hover:bg-purple-50"
+              >
+                <FolderKanban className="h-4 w-4 text-purple-600" />
+                <span>My Assignments</span>
               </Link>
             </div>
           </div>
@@ -80,8 +73,7 @@ async function UserPage() {
       </div>
 
       <div className="px-6 pb-6 space-y-8">
-
-      {/* Stats Grid */}
+        {/* Stats Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         {/* Total Attendance Days */}
         <div className="bg-white rounded-xl shadow-md p-6 border-l-4 border-blue-500">
@@ -258,7 +250,7 @@ async function UserPage() {
                 </tr>
               </thead>
               <tbody>
-                {stats.assignedBatches.map((batch) => {
+                {stats.assignedBatches.map((batch: typeof stats.assignedBatches[number]) => {
                   const progress =
                     batch.totalImages > 0
                       ? Math.round(
