@@ -133,7 +133,7 @@ export async function getHistory(limit = 50) {
       jobs.map((j) =>
         limiter(async () => {
           let status = j.status;
-          const processed = j.processed; // remains unchanged until manual ingestion
+          const processed = j.processed; 
           const total = j.totalImages;
 
           const mapStatus = (s: string): string => {
@@ -164,11 +164,8 @@ export async function getHistory(limit = 50) {
                   data: { status },
                 });
               }
-              // NOTE: Automatic output ingestion removed. Manual ingestion now required via ingestBatchOutput.
-              // We do NOT parse the output file here; processed/failed remain until user clicks ingest.
-            }
+                }
           } catch {
-            // Swallow OpenAI errors for history rendering; leave DB values
           }
 
           return {
@@ -403,13 +400,10 @@ export async function createCaptionBatch(
     if (captions.length === 0)
       return { success: false, error: "No images uploaded for batch" };
 
-    // temp jsonl file
     const tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "jsonl-"));
     const jsonlPath = path.join(tmpDir, `batch-${jobId}.jsonl`);
 
-    // Build JSONL lines
     const lines = captions.map((c) => {
-      // FIXED: correct input_image format
       return JSON.stringify({
         custom_id: c.id,
         method: "POST",
@@ -428,7 +422,7 @@ export async function createCaptionBatch(
                 },
                 {
                   type: "input_image",
-                  file_id: `${c.openaiFileId}`, // ✅ FIXED
+                  file_id: `${c.openaiFileId}`,
                 },
               ],
             },
@@ -557,82 +551,20 @@ export async function pollBatchAndIngest(jobId: string) {
     }
 
     if (batch.status === "completed") {
-      const outputFileId = (batch as unknown as { output_file_id?: string })
-        ?.output_file_id;
-      if (!outputFileId)
-        return { success: false, error: "No output file on completed batch" };
-
-      const captionRecords = await prisma.imageCaption.findMany({
-        where: { jobId },
-        select: { id: true },
-      });
-      const expectedIds = captionRecords.map((c) => c.id);
-
-      const fileResp = await openai.files.content(outputFileId as string);
-          console.log({fileResp})
-
-      const text = Buffer.from(await fileResp.arrayBuffer()).toString("utf8");
-      const lines = text.split(/\r?\n/).filter(Boolean);
-
-      const successIds = new Set<string>();
-      const failedIds = new Set<string>();
-
-      for (const line of lines) {
-        try {
-          const obj = JSON.parse(line);
-          const customId: string | undefined = obj.custom_id;
-          if (obj.error) {
-            if (customId) failedIds.add(customId);
-            continue;
-          }
-          const resp = obj.response;
-          const caption = extractTextFromResponse(resp);
-          if (
-            customId &&
-            typeof caption === "string" &&
-            caption.trim().length
-          ) {
-            await prisma.imageCaption.update({
-              where: { id: customId },
-              data: { preCaption: caption, status: "CAPTIONED" },
-            });
-            successIds.add(customId);
-          } else if (customId) {
-            failedIds.add(customId);
-          }
-        } catch {
-          // malformed line counts as failure but we cannot attribute id
-        }
-      }
-
-      for (const id of expectedIds) {
-        if (!successIds.has(id)) failedIds.add(id);
-      }
-
-      if (failedIds.size) {
-        await prisma.imageCaption.updateMany({
-          where: { id: { in: Array.from(failedIds) } },
-          data: { status: "FAILED" },
+      // Auto-ingestion disabled: only mark job as COMPLETED; captions populated via manual ingestBatchOutput
+      if (job.status !== "COMPLETED") {
+        await prisma.imageJob.update({
+          where: { id: jobId },
+          data: { status: "COMPLETED" },
         });
       }
-
-      const processed = successIds.size;
-      const failed = failedIds.size;
-      const total = job.totalImages || expectedIds.length;
-      const newStatus = failed > 0 ? "FAILED" : "COMPLETED";
-
-      await prisma.imageJob.update({
-        where: { id: jobId },
-        data: { processed, failed, status: newStatus },
-      });
-
       return {
         success: true,
         data: {
-          status: newStatus,
-          processed,
-          failed,
-          total,
+          status: "COMPLETED",
+          processed: job.processed,
+          failed: job.failed,
+          total: job.totalImages,
         },
       };
     }
@@ -751,7 +683,6 @@ export async function ingestBatchOutput(jobId: string) {
     if (!job) return { success: false, error: "Job not found" };
     if (!job.batchId) return { success: false, error: "Batch not associated with job" };
 
-    // Allow ingestion only if status suggests batch finished
     if (!["COMPLETED", "SUCCESSFUL"].includes(job.status)) {
       return { success: false, error: "Batch not completed yet" };
     }
