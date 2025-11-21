@@ -7,6 +7,7 @@ import {
   UserPlus,
   Workflow,
   ClipboardCheck,
+  Verified,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -45,6 +46,7 @@ export default function Sidebar() {
           { title: "User Management", url: "/admin/user", icon: Users },
           { title: "Assign Batch", url: "/admin/assign", icon: UserPlus },
           { title: "Process Batch", url: "/admin/process", icon: Workflow },
+          { title: "Approve Batch", url: "/admin/approve", icon: Verified },
           // { title: "Settings", url: "/admin/setting", icon: Settings },
         ]
       : [
