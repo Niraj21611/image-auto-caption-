@@ -15,6 +15,7 @@ import {
   ChevronLeft,
   ChevronRight,
   RefreshCw,
+  Download,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -147,12 +148,6 @@ export default function Page() {
     fetchUsersData();
   }, []);
 
-  useEffect(() => {
-    if (isViewDialogOpen && selectedUser) {
-      fetchWeeklyData();
-    }
-  }, [isViewDialogOpen, selectedUser, weekOffset]);
-
   const fetchWeeklyData = async () => {
     if (!selectedUser) return;
 
@@ -172,6 +167,13 @@ export default function Page() {
       setWeeklyData(res.data);
     }
   };
+
+  useEffect(() => {
+    if (isViewDialogOpen && selectedUser) {
+      fetchWeeklyData();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isViewDialogOpen, selectedUser, weekOffset]);
 
   const getWeekRangeText = () => {
     const now = new Date();
@@ -306,6 +308,48 @@ export default function Page() {
     }
   };
 
+  const exportToCSV = () => {
+    try {
+      // Prepare CSV headers
+      const headers = ["Name", "Email", "Login Time Today", "Status"];
+      
+      // Prepare CSV rows
+      const rows = users.map(user => {
+        const duration = todayDurations[user.id];
+        return [
+          user.name,
+          user.email,
+          duration?.formatted || "0h 0m",
+          duration?.isOnline ? "Online" : "Offline"
+        ];
+      });
+
+      // Combine headers and rows
+      const csvContent = [
+        headers.join(","),
+        ...rows.map(row => row.map(cell => `"${cell}"`).join(","))
+      ].join("\n");
+
+      // Create blob and download
+      const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+      const link = document.createElement("a");
+      const url = URL.createObjectURL(blob);
+      
+      const timestamp = new Date().toISOString().split("T")[0];
+      link.setAttribute("href", url);
+      link.setAttribute("download", `users_attendance_${timestamp}.csv`);
+      link.style.visibility = "hidden";
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      
+      toast.success("CSV exported successfully!");
+    } catch (err) {
+      console.error("Error exporting CSV:", err);
+      toast.error("Failed to export CSV");
+    }
+  };
+
   const openViewDialog = (user: User) => {
     setSelectedUser(user);
     setShowPassword(false);
@@ -343,7 +387,7 @@ export default function Page() {
           </div>
         </div>
         <div className="p-6 space-y-3">
-          {[...Array(5)].map((_, i) => (
+          {[...Array(5)].map((_, i: number) => (
             <div key={i} className="flex items-center space-x-4">
               <Skeleton className="h-10 w-10 rounded-full" />
               <div className="space-y-2">
@@ -428,6 +472,16 @@ export default function Page() {
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
+
+            <Button
+              variant="outline"
+              size="lg"
+              onClick={exportToCSV}
+              className="h-11 px-4 border-gray-300 hover:bg-gray-50 gap-2"
+            >
+              <Download className="h-4 w-4" />
+              Export CSV
+            </Button>
 
             <Button
               variant="outline"
@@ -818,7 +872,7 @@ export default function Page() {
             </div>
 
             <div className="grid grid-cols-7 gap-2">
-              {weeklyData?.daily.map((day, idx) => {
+              {weeklyData?.daily.map((day) => {
                 const date = new Date(day.date);
                 const dayName = date.toLocaleDateString('en-US', { weekday: 'short' });
                 const dayNum = date.getDate();

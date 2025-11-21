@@ -7,8 +7,10 @@ import {
   Clock,
   FolderOpen,
   TrendingUp,
+  Download,
 } from "lucide-react";
 import { getUserReviewStats } from "@/lib/actions/assignment.actions";
+import { toast } from "sonner";
 
 import {
   Table,
@@ -98,6 +100,93 @@ export default function UserAssignPage() {
       ? Math.round((data.reviewed / (data.reviewed + data.pending)) * 100)
       : 0;
 
+  const exportUserToCSV = () => {
+    try {
+      if (!data.jobs.length || !data.jobs[0].assignedUser) {
+        toast.error("No user data to export");
+        return;
+      }
+
+      const user = data.jobs[0].assignedUser;
+      
+      // Prepare CSV headers
+      const headers = [
+        "User Name",
+        "User Email",
+        "Directory Path",
+        "Total Images",
+        "Processed",
+        "Reviewed",
+        "Pending",
+        "Status",
+        "Progress (%)",
+        "Created At"
+      ];
+      
+      // Prepare CSV rows
+      const rows = data.jobs.map(job => {
+        const pending = Math.max(0, (job.processed || 0) - (job.reviewed || 0));
+        const progress = job.processed > 0 
+          ? Math.round((job.reviewed / job.processed) * 100) 
+          : 0;
+        
+        return [
+          user.name,
+          user.email,
+          job.dirPath,
+          job.totalImages.toString(),
+          job.processed.toString(),
+          job.reviewed.toString(),
+          pending.toString(),
+          job.status,
+          `${progress}%`,
+          new Date(job.createdAt).toLocaleString()
+        ];
+      });
+
+      // Add summary row
+      const summaryRow = [
+        "SUMMARY",
+        "",
+        `Total Batches: ${data.jobs.length}`,
+        "",
+        "",
+        `Total Reviewed: ${data.reviewed}`,
+        `Total Pending: ${data.pending}`,
+        "",
+        `Completion Rate: ${completionRate}%`,
+        ""
+      ];
+
+      // Combine headers, rows, and summary
+      const csvContent = [
+        headers.join(","),
+        ...rows.map(row => row.map(cell => `"${cell}"`).join(",")),
+        "",
+        summaryRow.map(cell => `"${cell}"`).join(",")
+      ].join("\n");
+
+      // Create blob and download
+      const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+      const link = document.createElement("a");
+      const url = URL.createObjectURL(blob);
+      
+      const timestamp = new Date().toISOString().split("T")[0];
+      const sanitizedName = user.name.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+      link.setAttribute("href", url);
+      link.setAttribute("download", `reviewer_${sanitizedName}_${timestamp}.csv`);
+      link.style.visibility = "hidden";
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      
+      toast.success("CSV exported successfully!");
+    } catch (err) {
+      console.error("Error exporting CSV:", err);
+      toast.error("Failed to export CSV");
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -125,6 +214,15 @@ export default function UserAssignPage() {
               Back to Assignments
             </Button>
           </Link>
+          
+          <Button
+            variant="outline"
+            onClick={exportUserToCSV}
+            className="gap-2"
+          >
+            <Download className="w-4 h-4" />
+            Export CSV
+          </Button>
         </div>
 
         {/* User Card */}
