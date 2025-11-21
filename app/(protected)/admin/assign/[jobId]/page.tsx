@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import {
@@ -17,7 +17,8 @@ import { useParams } from "next/navigation";
 import {
   approveAll,
   approveCaption,
-  getProcessedCaptionsForUser,
+  approveCaptionsBulk,
+  getProcessedCaptionsPage,
   getUserBatchOverview,
   rejectCaption,
 } from "@/lib/actions/assignment.actions";
@@ -35,7 +36,7 @@ export type ProcessedCaption = {
   filePath: string;
   preCaption: string | null;
   postCaption: string | null;
-  status: "CAPTIONED" | "REVIEWED" | "APPROVED";
+  status: "CAPTIONED" | "REVIEWED" | "APPROVED" | "FAILED";
   jobId: string | null;
   createdAt: Date;
 };
@@ -51,37 +52,87 @@ export default function AdminUserAssignPage() {
   );
   const [overview, setOverview] = useState<OverviewDataType | null>(null);
   const [captions, setCaptions] = useState<ProcessedCaption[]>([]);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalCount, setTotalCount] = useState(0);
+  const [page, setPage] = useState(1);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [hasFetched, setHasFetched] = useState(false);
+  const [bulkApproving, setBulkApproving] = useState(false);
+  const [approvingAll, setApprovingAll] = useState(false);
+  const [approvingId, setApprovingId] = useState<string | null>(null);
+  const [rejectingId, setRejectingId] = useState<string | null>(null);
+
+  const PAGE_SIZE = 12;
 
   useEffect(() => {
-    const fetchAllData = async () => {
+    setPage(1);
+    setSelectedIds(new Set());
+  }, [jobId]);
+
+  const loadOverview = useCallback(async () => {
+    if (!jobId) return;
+    const res = await getUserBatchOverview(jobId);
+    if (res.success && res.data) {
+      setOverview(res.data);
+      setUser(res.data.user);
+    }
+  }, [jobId]);
+
+  const loadCaptions = useCallback(
+    async (targetPage: number) => {
+      if (!jobId) return;
       try {
-        if (!jobId) return;
-        setLoading(true);
+        const res = await getProcessedCaptionsPage(jobId, targetPage, PAGE_SIZE);
+        if (res.success && res.data) {
+          const {
+            items,
+            totalPages: nextTotalPages,
+            totalCount: nextTotalCount,
+          } = res.data;
 
-        const [overviewRes, captionsRes] = await Promise.all([
-          getUserBatchOverview(jobId),
-          getProcessedCaptionsForUser(jobId),
-        ]);
+          if (nextTotalPages > 0 && targetPage > nextTotalPages) {
+            setPage(nextTotalPages);
+            return;
+          }
 
-        if (overviewRes.success && overviewRes.data) {
-          setOverview(overviewRes.data);
-          setUser(overviewRes.data.user);
-        }
-        if (captionsRes.success && captionsRes.data) {
-          setCaptions(captionsRes.data);
+          setCaptions(items);
+          setTotalPages(nextTotalPages || 1);
+          setTotalCount(nextTotalCount);
+          setSelectedIds(new Set());
+        } else if (!res.success) {
+          toast.error(res.error || "Failed to load captions");
         }
       } catch (err) {
-        console.error("Error fetching assignment data:", err);
+        console.error("Error loading captions page:", err);
+        toast.error("Failed to load captions");
+      } finally {
+        setHasFetched(true);
+      }
+    },
+    [jobId, PAGE_SIZE]
+  );
+
+  const loadPageData = useCallback(
+    async (targetPage: number) => {
+      if (!jobId) return;
+      setLoading(true);
+      try {
+        await Promise.all([loadOverview(), loadCaptions(targetPage)]);
       } finally {
         setLoading(false);
       }
-    };
+    },
+    [jobId, loadCaptions, loadOverview]
+  );
 
-    fetchAllData();
-  }, [jobId]);
+  useEffect(() => {
+    if (!jobId) return;
+    loadPageData(page);
+  }, [jobId, page, loadPageData]);
 
   const handleApprove = async (captionId: string) => {
     try {
+      setApprovingId(captionId);
       const res = await approveCaption(captionId);
       if (res.success) {
         setCaptions((prev) =>
@@ -89,15 +140,24 @@ export default function AdminUserAssignPage() {
             c.id === captionId ? { ...c, status: "APPROVED" } : c
           )
         );
+        setSelectedIds((prev) => {
+          const next = new Set(prev);
+          next.delete(captionId);
+          return next;
+        });
+        await loadOverview();
         toast.success("Caption approved");
       }
     } catch {
       toast.error("Error approving caption");
+    } finally {
+      setApprovingId(null);
     }
   };
 
   const handleReject = async (captionId: string) => {
     try {
+      setRejectingId(captionId);
       const res = await rejectCaption(captionId);
       if (res.success) {
         setCaptions((prev) =>
@@ -105,24 +165,62 @@ export default function AdminUserAssignPage() {
             c.id === captionId ? { ...c, status: "CAPTIONED" } : c
           )
         );
+        setSelectedIds((prev) => {
+          const next = new Set(prev);
+          next.delete(captionId);
+          return next;
+        });
+        await loadOverview();
 
         toast.success("Caption rejected");
       }
     } catch {
       toast.error("Error rejecting caption");
+    } finally {
+      setRejectingId(null);
     }
   };
 
   const handleApproveAll = async () => {
     try {
-      const res = await approveAll(jobId!);
+      if (!jobId) return;
+      setApprovingAll(true);
+      const res = await approveAll(jobId);
       if (res.success) {
-        setCaptions([]);
+        await Promise.all([loadOverview(), loadCaptions(page)]);
+        setSelectedIds(new Set());
         toast.success("All captions approved");
       }
     } catch {
       toast.error("Error approving all captions");
       return;
+    } finally {
+      setApprovingAll(false);
+    }
+  };
+
+  const handleApproveSelected = async () => {
+    if (!selectedIds.size) return;
+    try {
+      setBulkApproving(true);
+      const res = await approveCaptionsBulk(Array.from(selectedIds));
+      if (res.success) {
+        setCaptions((prev) =>
+          prev.map((c) =>
+            selectedIds.has(c.id) ? { ...c, status: "APPROVED" } : c
+          )
+        );
+        setSelectedIds(new Set());
+        await loadOverview();
+        toast.success("Selected captions approved");
+      } else if (res.error) {
+        toast.error(res.error);
+      }
+    } catch (err) {
+      console.error("Error approving selected captions:", err);
+      toast.error("Error approving selected captions");
+    } finally {
+      setBulkApproving(false);
     }
   };
 
@@ -135,7 +233,7 @@ export default function AdminUserAssignPage() {
     );
   }
 
-  if (captions.length === 0) {
+  if (!loading && hasFetched && totalCount === 0) {
     return (
       <div className="p-6 text-center">
         <h2 className="text-xl font-semibold text-neutral-900">
@@ -166,6 +264,28 @@ export default function AdminUserAssignPage() {
       </div>
     );
   }
+
+  const selectedCount = selectedIds.size;
+
+  const toggleSelection = (captionId: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(captionId)) {
+        next.delete(captionId);
+      } else {
+        next.add(captionId);
+      }
+      return next;
+    });
+  };
+
+  const goToPreviousPage = () => {
+    setPage((prev) => Math.max(1, prev - 1));
+  };
+
+  const goToNextPage = () => {
+    setPage((prev) => Math.min(totalPages, prev + 1));
+  };
 
   return (
     <div className="space-y-6">
@@ -235,16 +355,43 @@ export default function AdminUserAssignPage() {
         )}
 
         {/* Approve All */}
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div className="text-sm text-neutral-600">
-            Showing processed images for the selected batch.
+            Showing {captions.length} of {totalCount} images (page {page} of {totalPages}).
+            {selectedCount > 0 && (
+              <span className="ml-2 font-medium text-neutral-800">
+                {selectedCount} selected
+              </span>
+            )}
           </div>
-          <Button
-            onClick={handleApproveAll}
-            className="bg-green-600 hover:bg-green-700"
-          >
-            Approve All
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              onClick={handleApproveSelected}
+              disabled={!selectedCount || bulkApproving}
+              className="bg-blue-600 hover:bg-blue-700"
+            >
+              {bulkApproving ? (
+                <span className="flex items-center gap-2">
+                  <Loader2 className="h-4 w-4 animate-spin" /> Approving...
+                </span>
+              ) : (
+                "Approve Selected"
+              )}
+            </Button>
+            <Button
+              onClick={handleApproveAll}
+              disabled={approvingAll || totalCount === 0}
+              className="bg-green-600 hover:bg-green-700"
+            >
+              {approvingAll ? (
+                <span className="flex items-center gap-2">
+                  <Loader2 className="h-4 w-4 animate-spin" /> Approving...
+                </span>
+              ) : (
+                "Approve All"
+              )}
+            </Button>
+          </div>
         </div>
 
         {/* Captions Grid */}
@@ -277,6 +424,17 @@ export default function AdminUserAssignPage() {
                       <Badge text="Captioned" color="gray" />
                     )}
                   </div>
+                  <div className="absolute top-2 right-2">
+                    <label className="inline-flex items-center gap-2 rounded-md bg-white/90 px-2 py-1 text-xs font-medium text-neutral-700 shadow">
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 rounded border-neutral-300 text-blue-600 focus:ring-blue-500"
+                        checked={selectedIds.has(c.id)}
+                        onChange={() => toggleSelection(c.id)}
+                      />
+                      Select
+                    </label>
+                  </div>
                 </div>
 
                 <div className="p-3 space-y-2">
@@ -293,23 +451,65 @@ export default function AdminUserAssignPage() {
                 <div className="p-3 border-t border-neutral-200 flex items-center gap-2">
                   <Button
                     onClick={() => handleApprove(c.id)}
-                    disabled={c.status === "APPROVED"}
+                    disabled={c.status === "APPROVED" || approvingId === c.id || bulkApproving || approvingAll}
                     className="w-full bg-green-600 hover:bg-green-700"
                     size="sm"
                   >
-                    Approve
+                    {approvingId === c.id ? (
+                      <span className="flex items-center justify-center gap-2">
+                        <Loader2 className="h-4 w-4 animate-spin" /> Approving
+                      </span>
+                    ) : (
+                      "Approve"
+                    )}
                   </Button>
                   <Button
                     onClick={() => handleReject(c.id)}
                     variant="outline"
-                    className="w-full"
+                    className="w-full border border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700"
                     size="sm"
+                    disabled={rejectingId === c.id}
                   >
-                    <XCircle className="w-4 h-4 mr-1" /> Reject
+                    {rejectingId === c.id ? (
+                      <span className="flex items-center justify-center gap-2">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Rejecting
+                      </span>
+                    ) : (
+                      <span className="flex items-center justify-center gap-1">
+                        <XCircle className="w-4 h-4" /> Reject
+                      </span>
+                    )}
                   </Button>
                 </div>
               </div>
             ))}
+          </div>
+        )}
+
+        {totalPages > 1 && (
+          <div className="flex flex-col gap-3 border-t border-neutral-200 pt-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="text-sm text-neutral-600">
+              Page {page} of {totalPages}
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={goToPreviousPage}
+                disabled={page === 1}
+              >
+                Previous
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={goToNextPage}
+                disabled={page === totalPages}
+              >
+                Next
+              </Button>
+            </div>
           </div>
         )}
       </div>

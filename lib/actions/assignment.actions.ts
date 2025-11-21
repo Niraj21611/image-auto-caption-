@@ -168,6 +168,55 @@ export async function getProcessedCaptionsForUser(jobId: string) {
   }
 }
 
+export async function getProcessedCaptionsPage(
+  jobId: string,
+  page = 1,
+  pageSize = 12
+) {
+  if (!jobId) return { success: false, error: "jobId is required" };
+
+  const safePage = Math.max(1, Number(page) || 1);
+  const safePageSize = Math.max(1, Math.min(Number(pageSize) || 12, 100));
+  const skip = (safePage - 1) * safePageSize;
+
+  try {
+    const [totalCount, items] = await Promise.all([
+      prisma.imageCaption.count({ where: { jobId } }),
+      prisma.imageCaption.findMany({
+        where: { jobId },
+        orderBy: { createdAt: "asc" },
+        skip,
+        take: safePageSize,
+        select: {
+          id: true,
+          filePath: true,
+          preCaption: true,
+          postCaption: true,
+          status: true,
+          jobId: true,
+          createdAt: true,
+        },
+      }),
+    ]);
+
+    const totalPages = Math.max(1, Math.ceil(totalCount / safePageSize));
+
+    return {
+      success: true,
+      data: {
+        items,
+        totalCount,
+        totalPages,
+        page: safePage,
+        pageSize: safePageSize,
+      },
+    };
+  } catch (err) {
+    console.error("Error fetching paginated captions:", err);
+    return { success: false, error: "Failed to fetch captions" };
+  }
+}
+
 export async function approveCaption(captionId: string) {
   if (!captionId) return { success: false, error: "captionId is required" };
 
@@ -184,7 +233,7 @@ export async function approveCaption(captionId: string) {
     revalidatePath("/admin/assign");
     revalidatePath(`/admin/assign/${res.jobId}`);
 
-    return { success: true, caption: res };
+    return { success: true, data: res };
   } catch (err) {
     console.log("Error approving caption:", err);
     return { success: false, error: "Error approving caption" };
@@ -207,7 +256,7 @@ export async function rejectCaption(captionId: string) {
     revalidatePath("/admin/assign");
     revalidatePath(`/admin/assign/${res.jobId}`);
 
-    return { success: true, caption: res };
+    return { success: true, data: res };
   } catch (err) {
     console.log("Error rejecting caption:", err);
     return { success: false, error: "Error rejecting caption" };
@@ -230,9 +279,40 @@ export async function approveAll(jobId: string) {
     revalidatePath("/admin/assign");
     revalidatePath(`/admin/assign/${jobId}`);
 
-    return { success: true, caption: res };
+    return { success: true, data: res };
   } catch (err) {
     console.log("Error approving caption:", err);
     return { success: false, error: "Error approving caption" };
+  }
+}
+
+export async function approveCaptionsBulk(captionIds: string[]) {
+  if (!captionIds?.length) {
+    return { success: false, error: "No captions selected" };
+  }
+
+  try {
+    const res = await prisma.imageCaption.updateMany({
+      where: { id: { in: captionIds } },
+      data: { status: "APPROVED" },
+    });
+
+    revalidatePath("/admin/assign");
+    // Revalidate each job affected - find distinct job IDs
+    const jobs = await prisma.imageCaption.findMany({
+      where: { id: { in: captionIds } },
+      select: { jobId: true },
+      distinct: ["jobId"],
+    });
+    for (const job of jobs) {
+      if (job.jobId) {
+        revalidatePath(`/admin/assign/${job.jobId}`);
+      }
+    }
+
+    return { success: true, data: res };
+  } catch (err) {
+    console.error("Error approving selected captions:", err);
+    return { success: false, error: "Failed to approve selected captions" };
   }
 }
