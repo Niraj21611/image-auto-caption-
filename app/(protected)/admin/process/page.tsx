@@ -27,6 +27,8 @@ import {
   createCaptionBatch,
   pollBatchAndIngest,
   getPreparationStatus,
+  recreateFailedCaptionBatch,
+  ingestBatchOutput,
 } from "@/lib/actions/caption.actions";
 import { toast } from "sonner";
 
@@ -62,6 +64,7 @@ function formatEta(seconds?: number | null) {
 function normalizeStatus(status?: string | null) {
   if (!status) return "PROCESSING";
   const upper = status.toUpperCase();
+  if (upper === "SUCCESSFUL") return "SUCCESSFUL"; // show distinct successful state
   if (upper.includes("PREPARING")) return "PREPARING";
   if (upper === "READY") return "READY";
   if (upper === "FAILED") return "FAILED";
@@ -86,6 +89,7 @@ export default function ProcessPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [progress, setProgress] = useState<ProgressState | null>(null);
   const [history, setHistory] = useState<HistoryRow[]>([]);
+  const [ingestingJobs, setIngestingJobs] = useState<Set<string>>(new Set());
   const [isRefreshing, setIsRefreshing] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const prepPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -126,6 +130,14 @@ export default function ProcessPage() {
           text: "text-emerald-900",
           badge: "bg-emerald-100 text-emerald-800",
         };
+      case "SUCCESSFUL":
+        return {
+          card: "from-teal-50 to-green-50 border-teal-200",
+          meterBg: "bg-teal-100",
+          meterFill: "bg-teal-600",
+          text: "text-teal-900",
+          badge: "bg-teal-100 text-teal-800",
+        };
       case "BATCH_SUBMITTED":
         return {
           card: "from-sky-50 to-blue-50 border-sky-200",
@@ -162,6 +174,8 @@ export default function ProcessPage() {
         return "Failed";
       case "COMPLETED":
         return "Completed";
+      case "SUCCESSFUL":
+        return "Ingested";
       case "BATCH_SUBMITTED":
         return "Batch submitted";
       case "RUNNING":
@@ -180,13 +194,15 @@ export default function ProcessPage() {
       case "READY":
         return "Uploads finished. Create the OpenAI batch to start captioning.";
       case "FAILED":
-        return "Preparation failed. Fix the directory or images, then try again.";
+        return "Batch failed. You can attempt to recreate a batch for failed images.";
       case "BATCH_SUBMITTED":
         return "Batch sent to OpenAI. Waiting for completion.";
       case "RUNNING":
         return "OpenAI is generating captions. We'll ingest them as soon as they're ready.";
       case "COMPLETED":
-        return "Captions ingested successfully.";
+        return "Batch finished. Manual ingestion may still be pending.";
+      case "SUCCESSFUL":
+        return "Output file ingested. Captions populated.";
       default:
         return "Processing batch.";
     }
@@ -369,12 +385,64 @@ export default function ProcessPage() {
     }
   };
 
+  const recreate = async () => {
+    if (!jobId) {
+      toast.error("No job to recreate");
+      return;
+    }
+    setIsSubmitting(true);
+    try {
+      const res = await recreateFailedCaptionBatch(jobId, DEFAULT_PROMPT);
+      if (!res.success || !res.data?.batchId) {
+        toast.error(res.error || "Failed to recreate batch");
+        return;
+      }
+      toast.success("Retry batch submitted to OpenAI");
+      setProgress((prev) => ({
+        processed: prev?.processed ?? 0,
+        total: prev?.total ?? imageCount ?? 0,
+        failed: 0,
+        status: "BATCH_SUBMITTED",
+        etaSeconds: null,
+      }));
+      startBatchPolling(jobId);
+      await fetchHistory();
+    } catch (err) {
+      console.error("recreateFailedCaptionBatch error", err);
+      toast.error("Failed to recreate batch");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const ingestOutput = async (targetJobId: string) => {
+    setIngestingJobs((prev) => new Set(prev).add(targetJobId));
+    try {
+      const res = await ingestBatchOutput(targetJobId);
+      if (!res.success) {
+        toast.error(res.error || "Failed to ingest output file");
+      } else {
+        toast.success("Batch output ingested");
+        await fetchHistory();
+      }
+    } catch (err) {
+      console.error("ingestBatchOutput error", err);
+      toast.error("Failed to ingest batch output");
+    } finally {
+      setIngestingJobs((prev) => {
+        const next = new Set(prev);
+        next.delete(targetJobId);
+        return next;
+      });
+    }
+  };
+
   const canCreateBatch = Boolean(jobId && statusKey === "READY");
 
   return (
     <div className="space-y-6">
       <div className="sticky top-0 z-40 bg-white border-b border-border">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="max-w-6xl px-4 sm:px-6 lg:px-8">
           <div className="flex items-center h-16">
             <div>
               <h1 className="text-lg font-semibold text-foreground">Image Caption Processor</h1>
@@ -472,7 +540,7 @@ export default function ProcessPage() {
                     <p className="text-xs font-semibold uppercase tracking-wide flex items-center gap-2">
                       {statusKey === "FAILED" ? (
                         <XCircle className="w-4 h-4 text-rose-600" />
-                      ) : statusKey === "READY" || statusKey === "COMPLETED" ? (
+                      ) : statusKey === "READY" || statusKey === "COMPLETED" || statusKey === "SUCCESSFUL" ? (
                         <CheckCircle2 className="w-4 h-4 text-emerald-600" />
                       ) : (
                         <Loader2 className="w-4 h-4 text-amber-600 animate-spin" />
@@ -507,6 +575,27 @@ export default function ProcessPage() {
                     <p className="text-xs text-rose-700">
                       {progress.failed} item{progress.failed === 1 ? "" : "s"} failed during processing.
                     </p>
+                  )}
+                  {statusKey === "FAILED" && (
+                    <div className="mt-2 flex flex-wrap items-center gap-3">
+                      <p className="text-xs text-rose-700">The batch failed. You can retry only failed images.</p>
+                      <Button
+                        size="sm"
+                        onClick={recreate}
+                        disabled={isSubmitting}
+                        className="gap-2 bg-red-600 hover:bg-red-700 text-white"
+                      >
+                        {isSubmitting ? (
+                          <>
+                            <Loader2 className="w-3 h-3 animate-spin" /> Retrying...
+                          </>
+                        ) : (
+                          <>
+                            <RotateCw className="w-3 h-3" /> Recreate Batch
+                          </>
+                        )}
+                      </Button>
+                    </div>
                   )}
                   {statusKey === "READY" && (
                     <div className="mt-2 flex flex-wrap items-center gap-3">
@@ -606,21 +695,47 @@ export default function ProcessPage() {
                           {h.dirPath}
                         </TableCell>
                         <TableCell className="text-center py-4 px-6">
-                          <span
-                            className={`inline-flex items-center justify-center px-3 py-1 rounded-full text-xs font-semibold ${
-                              h.status === "COMPLETED"
-                                ? "bg-green-100 text-green-700"
-                                : h.status === "RUNNING"
-                                  ? "bg-orange-100 text-orange-700"
-                                  : h.status === "FAILED"
-                                    ? "bg-red-100 text-red-700"
-                                    : h.status === "READY"
-                                      ? "bg-emerald-100 text-emerald-700"
-                                      : "bg-gray-100 text-gray-700"
-                            }`}
-                          >
-                            {h.status}
-                          </span>
+                          <div className="flex flex-col items-center gap-2">
+                            <span
+                              className={`inline-flex items-center justify-center px-3 py-1 rounded-full text-xs font-semibold ${
+                                h.status === "SUCCESSFUL"
+                                  ? "bg-teal-100 text-teal-700"
+                                  : h.status === "COMPLETED"
+                                    ? "bg-green-100 text-green-700"
+                                    : h.status === "RUNNING"
+                                      ? "bg-orange-100 text-orange-700"
+                                      : h.status === "FAILED"
+                                        ? "bg-red-100 text-red-700"
+                                        : h.status === "READY"
+                                          ? "bg-emerald-100 text-emerald-700"
+                                          : "bg-gray-100 text-gray-700"
+                              }`}
+                            >
+                              {h.status === "SUCCESSFUL" ? "SUCCESSFUL" : h.status}
+                              {h.status === "SUCCESSFUL" && (
+                                <span className="ml-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-teal-200 text-teal-900">Ingested</span>
+                              )}
+                            </span>
+                            {h.status === "COMPLETED" && h.processed === 0 && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                disabled={ingestingJobs.has(h.jobId)}
+                                onClick={() => ingestOutput(h.jobId)}
+                                className="gap-2"
+                              >
+                                {ingestingJobs.has(h.jobId) ? (
+                                  <>
+                                    <Loader2 className="w-3 h-3 animate-spin" /> Ingesting...
+                                  </>
+                                ) : (
+                                  <>
+                                    <RotateCw className="w-3 h-3" /> Ingest Output
+                                  </>
+                                )}
+                              </Button>
+                            )}
+                          </div>
                         </TableCell>
                         <TableCell className="text-center py-4 px-6">
                           <span className="inline-flex items-center justify-center px-3 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-700">

@@ -39,14 +39,6 @@ interface PreparationState {
 
 const preparationStates: Map<string, PreparationState> = new Map();
 
-// function updatePreparationState(jobId: string, updater: (prev: PreparationState) => PreparationState) {
-//   const prev = preparationStates.get(jobId);
-//   if (!prev) return;
-//   const next = updater(prev);
-//   next.updatedAt = Date.now();
-//   preparationStates.set(jobId, next);
-// }
-
 function computeEtaSeconds(state: PreparationState): number | null {
   if (!state.uploaded || state.uploaded <= 0) return null;
   const elapsedMs = Date.now() - state.startedAt;
@@ -118,538 +110,6 @@ export async function analyzeDirectory(dirPath: string) {
   }
 }
 
-// Removed legacy in-process OpenAI captioning helpers in favor of worker-based processing
-
-// ContentPart type was used by removed legacy function; no longer needed
-
-// async function captionBatchWithOpenAI(...) was removed as we now process in worker threads
-
-// export async function startProcessing(
-//   jobId: string,
-//   batchSize: number = 5,
-//   dirPath?: string,
-//   concurrency?: number
-// ) {
-//   let job = jobs.get(jobId);
-//   if (!job) {
-//     // Attempt to reconstruct the job if a directory was provided
-//     if (dirPath) {
-//       try {
-//         const stats = await fs.promises.stat(dirPath).catch(() => null);
-//         if (!stats || !stats.isDirectory()) {
-//           return {
-//             success: false,
-//             error: "Provided path is not a directory or not accessible",
-//           };
-//         }
-//         const images = await listImagesRecursive(dirPath);
-//         job = {
-//           id: jobId,
-//           dirPath,
-//           images,
-//           total: images.length,
-//           processed: 0,
-//           failed: 0,
-//           status: "idle",
-//         };
-//         jobs.set(jobId, job);
-//       } catch (e) {
-//         const msg = e instanceof Error ? e.message : String(e);
-//         return {
-//           success: false,
-//           error: `Invalid job id and failed to create job: ${msg}`,
-//         };
-//       }
-//     } else {
-//       return { success: false, error: "Invalid job id" };
-//     }
-//   }
-//   if (job.status === "running") return { success: true, started: false };
-
-//   job.status = "running";
-//   job.startedAt = Date.now();
-//   jobs.set(jobId, job);
-
-//   // Reflect running state in DB if the job exists
-//   try {
-//     await prisma.imageJob.update({
-//       where: { id: jobId },
-//       data: { status: "RUNNING", processed: 0 },
-//     });
-//   } catch {}
-
-//   (async () => {
-//     try {
-//       // Build worker pool and process in parallel batches
-//       const cpu = Math.max(1, (os.cpus()?.length || 2) - 1);
-//       const envConcurrency = Number.parseInt(
-//         process.env.CAPTION_CONCURRENCY || "",
-//         10
-//       );
-//       const forceSerial =
-//         String(process.env.CAPTION_FORCE_SERIAL || "").toLowerCase() === "1";
-//       const requested =
-//         typeof concurrency === "number" && !Number.isNaN(concurrency)
-//           ? concurrency
-//           : isNaN(envConcurrency)
-//           ? 1
-//           : envConcurrency;
-//       const poolSize = forceSerial
-//         ? 1
-//         : Math.max(1, Math.min(requested, 6, cpu));
-//       const apiKey = process.env.OPENAI_API_KEY || "";
-//       const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
-//       if (!apiKey) throw new Error("OPENAI_API_KEY is not set");
-
-//       const workerPath = path.resolve(
-//         process.cwd(),
-//         "lib/workers/captionWorker.mjs"
-//       );
-
-//       // Seed processed count with already-captioned images and skip them
-//       const already = await prisma.imageCaption.findMany({
-//         where: { filePath: { in: job.images } },
-//         select: { filePath: true },
-//       });
-//       const doneSet = new Set(already.map((a) => a.filePath));
-//       job.processed = doneSet.size;
-//       try {
-//         await prisma.imageJob.update({
-//           where: { id: jobId },
-//           data: { processed: job.processed },
-//         });
-//       } catch {}
-//       const remainingImages = job.images.filter((f) => !doneSet.has(f));
-
-//       const configuredBatch = Number.parseInt(
-//         process.env.CAPTION_BATCH_SIZE || "",
-//         10
-//       );
-//       // Request override (batchSize param) has highest priority
-//       const requestedBatch =
-//         typeof batchSize === "number" && !Number.isNaN(batchSize)
-//           ? batchSize
-//           : undefined;
-//       const effBatchSizeRaw = Math.max(
-//         1,
-//         requestedBatch ?? (isNaN(configuredBatch) ? 5 : configuredBatch)
-//       );
-//       const effBatchSize = forceSerial ? 1 : effBatchSizeRaw;
-//       const batches: string[][] = [];
-//       for (let i = 0; i < remainingImages.length; i += effBatchSize) {
-//         batches.push(remainingImages.slice(i, i + effBatchSize));
-//       }
-
-//       // Track if we should stop (check DB status periodically)
-//       let shouldStop = false;
-//       const checkStop = async () => {
-//         try {
-//           const rec = await prisma.imageJob.findUnique({
-//             where: { id: jobId },
-//             select: { status: true },
-//           });
-//           if (rec?.status === "CANCELLED") {
-//             shouldStop = true;
-//           }
-//         } catch {}
-//       };
-
-//       let cursor = 0;
-//       async function runNext(): Promise<void> {
-//         if (shouldStop) return; // stop early if cancelled
-//         const idx = cursor++;
-//         if (idx >= batches.length) return;
-//         const batch = batches[idx];
-//         // Re-check completion for this batch to avoid redundant worker calls
-//         const work = batch.filter((f) => !doneSet.has(f));
-//         if (work.length === 0) {
-//           // Nothing left to do in this batch
-//           return;
-//         }
-
-//         // Periodic stop check every 3 batches
-//         if (idx % 3 === 0) await checkStop();
-//         if (shouldStop) return;
-
-//         try {
-//           const captions = await new Promise<string[]>((resolve, reject) => {
-//             let w: Worker;
-//             try {
-//               const workerURL = new URL(
-//                 "../workers/captionWorker.mjs",
-//                 import.meta.url
-//               );
-//               // Cast to any to allow 'type' as TS WorkerOptions may miss it in our types
-//               // eslint-disable-next-line @typescript-eslint/no-explicit-any
-//               w = new Worker(workerURL as unknown as string, {
-//                 ...({ type: "module" } as any),
-//               });
-//             } catch {
-//               try {
-//                 // Fallback to filesystem path; ensure ESM type
-//                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-//                 w = new Worker(workerPath as unknown as string, {
-//                   ...({ type: "module" } as any),
-//                 });
-//               } catch (err) {
-//                 return reject(err);
-//               }
-//             }
-//             const baseTimeout = Number.parseInt(
-//               process.env.CAPTION_WORKER_TIMEOUT_BASE_MS || "",
-//               10
-//             );
-//             const perImageTimeout = Number.parseInt(
-//               process.env.CAPTION_WORKER_TIMEOUT_PER_IMAGE_MS || "",
-//               10
-//             );
-//             const fallbackMs = Number.parseInt(
-//               process.env.CAPTION_WORKER_TIMEOUT_MS || "",
-//               10
-//             );
-//             // Backward compat: CAPTION_WORKER_TIMEOUT_MS overrides if set
-//             const dynamicMs =
-//               (isNaN(baseTimeout) ? 180000 : Math.max(30000, baseTimeout)) +
-//               (isNaN(perImageTimeout) ? 30000 : Math.max(0, perImageTimeout)) *
-//                 batch.length;
-//             let ms = isNaN(fallbackMs)
-//               ? dynamicMs
-//               : Math.max(30000, fallbackMs);
-//             // Hard cap to 15 minutes to avoid runaway workers
-//             ms = Math.min(ms, 15 * 60 * 1000);
-
-//             let to: NodeJS.Timeout | undefined = setTimeout(() => {
-//               try {
-//                 w.terminate();
-//               } catch {}
-//               reject(new Error("Worker timed out"));
-//             }, ms);
-
-//             const resetTimer = () => {
-//               if (to) clearTimeout(to);
-//               to = setTimeout(() => {
-//                 try {
-//                   w.terminate();
-//                 } catch {}
-//                 reject(new Error("Worker timed out"));
-//               }, ms);
-//             };
-
-//             const onMessage = (msg: unknown) => {
-//               const m = msg as {
-//                 ok?: boolean;
-//                 captions?: unknown;
-//                 error?: unknown;
-//                 type?: string;
-//               };
-//               if (m?.ok) {
-//                 if (to) clearTimeout(to);
-//                 w.removeAllListeners("message");
-//                 w.removeAllListeners("error");
-//                 const arr = Array.isArray(m.captions)
-//                   ? (m.captions as string[])
-//                   : [];
-//                 return resolve(arr);
-//               }
-//               if (m?.type === "progress") {
-//                 // Heartbeat/progress from worker; keep it alive
-//                 resetTimer();
-//                 return;
-//               }
-//               if (m && Object.prototype.hasOwnProperty.call(m, "error")) {
-//                 if (to) clearTimeout(to);
-//                 w.removeAllListeners("message");
-//                 w.removeAllListeners("error");
-//                 const em = (m as { error?: string }).error ?? "Worker failed";
-//                 return reject(new Error(em));
-//               }
-//             };
-
-//             w.on("message", onMessage);
-//             w.once("error", (err) => {
-//               if (to) clearTimeout(to);
-//               w.removeAllListeners("message");
-//               reject(err);
-//             });
-//             w.postMessage({ images: work, apiKey, model });
-//           });
-
-//           while (captions.length < work.length) captions.push("");
-//           if (captions.length > work.length) captions.length = work.length;
-
-//           for (let k = 0; k < work.length; k++) {
-//             const filePath = work[k];
-//             const preCaption = captions[k] || "";
-//             try {
-//               // Skip if already exists (race-safe)
-//               const existing = await prisma.imageCaption.findUnique({
-//                 where: { filePath },
-//                 select: { id: true },
-//               });
-//               if (existing) {
-//                 // Count it as processed baseline; no DB upsert needed
-//                 continue;
-//               }
-//               await prisma.imageCaption.upsert({
-//                 where: { filePath },
-//                 create: {
-//                   filePath,
-//                   status: "CAPTIONED",
-//                   preCaption,
-//                   postCaption: null,
-//                   jobId,
-//                 },
-//                 update: {
-//                   status: "CAPTIONED",
-//                   preCaption,
-//                   jobId,
-//                 },
-//               });
-//               job!.processed += 1;
-//               doneSet.add(filePath);
-//               jobs.set(jobId, job as JobState);
-//               try {
-//                 await prisma.imageJob.update({
-//                   where: { id: jobId },
-//                   data: { processed: job!.processed },
-//                 });
-//               } catch {}
-//             } catch (err) {
-//               console.error("DB upsert error for", filePath, err);
-//               job!.failed += 1;
-//               try {
-//                 await prisma.imageJob.update({
-//                   where: { id: jobId },
-//                   data: { failed: job!.failed },
-//                 });
-//               } catch {}
-//             }
-//           }
-//         } catch (err) {
-//           const msg = err instanceof Error ? err.message : String(err);
-//           console.error("Worker batch failed:", msg);
-//           // Handle rate limit by re-queuing with backoff
-//           if (/rate limit|429/i.test(msg)) {
-//             const delay = 1200 + Math.floor(Math.random() * 600);
-//             await new Promise((r) => setTimeout(r, delay));
-//             // Re-enqueue only pending items not yet processed
-//             const pending = batch.filter((f) => !doneSet.has(f));
-//             if (pending.length) batches.push(pending);
-//           } else {
-//             // Count whole batch as failed and continue
-//             job!.failed += work.length;
-//             try {
-//               await prisma.imageJob.update({
-//                 where: { id: jobId },
-//                 data: { failed: job!.failed },
-//               });
-//             } catch {}
-//           }
-//         } finally {
-//           await runNext();
-//         }
-//       }
-
-//       const starters = Math.min(poolSize, batches.length);
-//       const tasks: Promise<void>[] = [];
-//       for (let i = 0; i < starters; i++) tasks.push(runNext());
-//       await Promise.all(tasks);
-
-//       if (shouldStop) {
-//         // Job was cancelled; leave status as CANCELLED
-//         job.status = "cancelled";
-//         job.finishedAt = Date.now();
-//         jobs.set(jobId, job);
-//         try {
-//           await prisma.imageJob.update({
-//             where: { id: jobId },
-//             data: { status: "CANCELLED" },
-//           });
-//         } catch {}
-//       } else {
-//         // Only mark COMPLETED if all images are processed
-//         if (job.processed >= job.total) {
-//           job.status = "completed";
-//           try {
-//             await prisma.imageJob.update({
-//               where: { id: jobId },
-//               data: { status: "COMPLETED" },
-//             });
-//           } catch {}
-//         } else {
-//           job.status = "failed";
-//           try {
-//             await prisma.imageJob.update({
-//               where: { id: jobId },
-//               data: { status: "FAILED" },
-//             });
-//           } catch {}
-//         }
-//         job.finishedAt = Date.now();
-//         jobs.set(jobId, job);
-//       }
-//     } catch (err: unknown) {
-//       job.status = "failed";
-//       job.error = err instanceof Error ? err.message : "Processing failed";
-//       job.finishedAt = Date.now();
-//       jobs.set(jobId, job);
-//       try {
-//         await prisma.imageJob.update({
-//           where: { id: jobId },
-//           data: { status: "FAILED" },
-//         });
-//       } catch {}
-//     }
-//   })();
-
-//   return { success: true, started: true };
-// }
-
-// export async function stopProcessing(jobId: string) {
-//   try {
-//     // Update DB to CANCELLED so it stops polling and can be resumed
-//     await prisma.imageJob.update({
-//       where: { id: jobId },
-//       data: { status: "CANCELLED" },
-//     });
-//     // Clear in-memory job if present
-//     const job = jobs.get(jobId);
-//     if (job) {
-//       job.status = "cancelled";
-//       jobs.set(jobId, job);
-//     }
-//     return { success: true };
-//   } catch (err: unknown) {
-//     const msg = err instanceof Error ? err.message : String(err);
-//     return { success: false, error: msg };
-//   }
-// }
-
-// export async function getProgress(jobId: string, dirPath?: string) {
-//   // Prefer ImageJob in DB as the source of truth if present
-//   try {
-//     const rec = await prisma.imageJob.findUnique({ where: { id: jobId } });
-//     if (rec) {
-//       const statusMap: Record<string, JobStatus> = {
-//         READY: "idle",
-//         RUNNING: "running",
-//         COMPLETED: "completed",
-//         FAILED: "failed",
-//         CANCELLED: "cancelled",
-//       };
-//       let mappedStatus: JobStatus =
-//         statusMap[rec.status] ||
-//         (rec.status?.toLowerCase() as JobStatus) ||
-//         "idle";
-//       const isDoneByCounts =
-//         rec.totalImages > 0 && rec.processed >= rec.totalImages;
-//       if (isDoneByCounts && rec.status !== "COMPLETED") {
-//         // Self-heal DB status to keep UI and DB aligned
-//         try {
-//           await prisma.imageJob.update({
-//             where: { id: jobId },
-//             data: { status: "COMPLETED" },
-//           });
-//           mappedStatus = "completed";
-//         } catch {
-//           // If update fails, do NOT present completed; keep DB truth to avoid mismatch complaints
-//         }
-//       }
-//       return {
-//         success: true,
-//         job: {
-//           status: mappedStatus,
-//           total: rec.totalImages,
-//           processed: rec.processed,
-//           dirPath: rec.dirPath,
-//           startedAt: rec.createdAt
-//             ? new Date(rec.createdAt).getTime()
-//             : undefined,
-//           finishedAt:
-//             rec.status === "COMPLETED"
-//               ? rec.updatedAt
-//                 ? new Date(rec.updatedAt).getTime()
-//                 : undefined
-//               : undefined,
-//           error: undefined,
-//         },
-//       };
-//     }
-//   } catch {}
-
-//   const j = jobs.get(jobId);
-//   if (j) {
-//     return {
-//       success: true,
-//       job: {
-//         status: j.status,
-//         total: j.total,
-//         processed: j.processed,
-//         dirPath: j.dirPath,
-//         startedAt: j.startedAt,
-//         finishedAt: j.finishedAt,
-//         error: j.error,
-//       },
-//     };
-//   }
-
-//   // Fallback for serverless/stateless: infer progress from DB + filesystem if dirPath provided
-//   if (dirPath) {
-//     try {
-//       const stats = await fs.promises.stat(dirPath).catch(() => null);
-//       if (!stats || !stats.isDirectory()) {
-//         return {
-//           success: false,
-//           error: "Provided path is not a directory or not accessible",
-//         };
-//       }
-//       const images = await listImagesRecursive(dirPath);
-//       const total = images.length;
-//       // Count processed images stored in DB for this dir using explicit list to avoid regex issues on Windows paths
-//       const processed = await prisma.imageCaption.count({
-//         where: { filePath: { in: images } },
-//       });
-//       // Earliest and latest timestamps for ETA/finished (also using explicit list)
-//       const first = await prisma.imageCaption.findFirst({
-//         where: { filePath: { in: images } },
-//         orderBy: { createdAt: "asc" },
-//         select: { createdAt: true },
-//       });
-//       const last = await prisma.imageCaption.findFirst({
-//         where: { filePath: { in: images } },
-//         orderBy: { createdAt: "desc" },
-//         select: { createdAt: true },
-//       });
-//       const status: JobStatus =
-//         processed >= total && total > 0
-//           ? "completed"
-//           : processed > 0
-//           ? "running"
-//           : "idle";
-//       return {
-//         success: true,
-//         job: {
-//           status,
-//           total,
-//           processed,
-//           dirPath,
-//           startedAt: first?.createdAt ? first.createdAt.getTime() : undefined,
-//           finishedAt:
-//             status === "completed" && last?.createdAt
-//               ? last.createdAt.getTime()
-//               : undefined,
-//           error: undefined,
-//         },
-//       };
-//     } catch (e) {
-//       const msg = e instanceof Error ? e.message : String(e);
-//       return { success: false, error: msg };
-//     }
-//   }
-
-//   return { success: false, error: "Invalid job id" };
-// }
-
 export async function getHistory(limit = 50) {
   try {
     const openai = getOpenAIClient();
@@ -673,8 +133,7 @@ export async function getHistory(limit = 50) {
       jobs.map((j) =>
         limiter(async () => {
           let status = j.status;
-          let processed = j.processed;
-          let failed = 0;
+          const processed = j.processed; // remains unchanged until manual ingestion
           const total = j.totalImages;
 
           const mapStatus = (s: string): string => {
@@ -705,56 +164,8 @@ export async function getHistory(limit = 50) {
                   data: { status },
                 });
               }
-              if (b.status === "completed") {
-                const outputFileId = (
-                  b as unknown as { output_file_id?: string }
-                )?.output_file_id;
-                if (outputFileId) {
-                  const fileResp = await openai.files.content(outputFileId);
-                  const text = Buffer.from(
-                    await fileResp.arrayBuffer()
-                  ).toString("utf8");
-                  const lines = text.split(/\r?\n/).filter(Boolean);
-                  let ok = 0;
-                  let bad = 0;
-                  for (const line of lines) {
-                    try {
-                      const obj = JSON.parse(line);
-                      const isError = !!obj?.error;
-                      const customId: string | undefined = obj?.custom_id;
-                      if (!customId) {
-                        bad += 1;
-                        continue;
-                      }
-                      if (isError) {
-                        bad += 1;
-                        continue;
-                      }
-                      const caption = extractTextFromResponse(obj?.response);
-                      await prisma.imageCaption.update({
-                        where: { id: customId },
-                        data: { preCaption: caption, status: "CAPTIONED" },
-                      });
-                      ok += 1;
-                    } catch {
-                      bad += 1;
-                    }
-                  }
-                  processed = ok;
-                  failed = bad;
-                  await prisma.imageJob.update({
-                    where: { id: j.id },
-                    data: { processed, failed, status: "COMPLETED" },
-                  });
-                  status = "COMPLETED";
-                }
-              } else if (b.status === "failed") {
-                status = "FAILED";
-                await prisma.imageJob.update({
-                  where: { id: j.id },
-                  data: { status },
-                });
-              }
+              // NOTE: Automatic output ingestion removed. Manual ingestion now required via ingestBatchOutput.
+              // We do NOT parse the output file here; processed/failed remain until user clicks ingest.
             }
           } catch {
             // Swallow OpenAI errors for history rendering; leave DB values
@@ -880,14 +291,20 @@ export async function prepareAndUpload(dirPath: string) {
       };
 
       try {
-        await Promise.all(images.map((filePath) => limit(() => uploadFile(filePath))));
-        const finalStatus: PreparationPhase = state.uploaded > 0 ? "READY" : "FAILED";
+        await Promise.all(
+          images.map((filePath) => limit(() => uploadFile(filePath)))
+        );
+        const finalStatus: PreparationPhase =
+          state.uploaded > 0 ? "READY" : "FAILED";
         state.status = finalStatus;
         state.updatedAt = Date.now();
         preparationStates.set(job.id, { ...state });
         await prisma.imageJob.update({
           where: { id: job.id },
-          data: { status: finalStatus === "READY" ? "READY" : "FAILED", failed: state.failed },
+          data: {
+            status: finalStatus === "READY" ? "READY" : "FAILED",
+            failed: state.failed,
+          },
         });
       } catch (err) {
         state.status = "FAILED";
@@ -932,7 +349,13 @@ export async function getPreparationStatus(jobId: string) {
 
     const job = await prisma.imageJob.findUnique({
       where: { id: jobId },
-      select: { id: true, dirPath: true, status: true, totalImages: true, failed: true },
+      select: {
+        id: true,
+        dirPath: true,
+        status: true,
+        totalImages: true,
+        failed: true,
+      },
     });
     if (!job) return { success: false, error: "Job not found" };
 
@@ -940,8 +363,8 @@ export async function getPreparationStatus(jobId: string) {
       job.status === "READY"
         ? "READY"
         : job.status === "FAILED"
-          ? "FAILED"
-          : "PREPARING";
+        ? "FAILED"
+        : "PREPARING";
 
     return {
       success: true,
@@ -986,6 +409,7 @@ export async function createCaptionBatch(
 
     // Build JSONL lines
     const lines = captions.map((c) => {
+      // FIXED: correct input_image format
       return JSON.stringify({
         custom_id: c.id,
         method: "POST",
@@ -1003,8 +427,8 @@ export async function createCaptionBatch(
                     "Write a concise, descriptive caption for this image.",
                 },
                 {
-                  type: "input_image_url",
-                  image_url: c.openaiFileId,
+                  type: "input_image",
+                  file_id: `${c.openaiFileId}`, // ✅ FIXED
                 },
               ],
             },
@@ -1079,6 +503,59 @@ export async function pollBatchAndIngest(jobId: string) {
     const openai = getOpenAIClient();
     const batch = await openai.batches.retrieve(job.batchId);
 
+    // Handle failed batch early
+    if (batch.status === "failed") {
+      // Attempt to parse error file for granular failures; fallback mark all
+      let failedIds: string[] = [];
+      try {
+        const errorFileId = (batch as unknown as { error_file_id?: string })
+          ?.error_file_id;
+        if (errorFileId) {
+          const fileResp = await openai.files.content(errorFileId);
+          const text = Buffer.from(await fileResp.arrayBuffer()).toString(
+            "utf8"
+          );
+          const lines = text.split(/\r?\n/).filter(Boolean);
+          for (const line of lines) {
+            try {
+              const obj = JSON.parse(line);
+              if (obj?.custom_id) failedIds.push(String(obj.custom_id));
+            } catch {}
+          }
+        }
+      } catch {
+        // swallow error file issues
+      }
+      if (failedIds.length === 0) {
+        const all = await prisma.imageCaption.findMany({
+          where: { jobId },
+          select: { id: true },
+        });
+        failedIds = all.map((a) => a.id);
+      }
+      await prisma.imageCaption.updateMany({
+        where: { id: { in: failedIds } },
+        data: { status: "FAILED" },
+      });
+      await prisma.imageJob.update({
+        where: { id: jobId },
+        data: {
+          status: "FAILED",
+          failed: failedIds.length,
+          processed: 0,
+        },
+      });
+      return {
+        success: true,
+        data: {
+          status: "FAILED",
+          processed: 0,
+          failed: failedIds.length,
+          total: job.totalImages,
+        },
+      };
+    }
+
     if (batch.status === "completed") {
       const outputFileId = (batch as unknown as { output_file_id?: string })
         ?.output_file_id;
@@ -1092,6 +569,8 @@ export async function pollBatchAndIngest(jobId: string) {
       const expectedIds = captionRecords.map((c) => c.id);
 
       const fileResp = await openai.files.content(outputFileId as string);
+          console.log({fileResp})
+
       const text = Buffer.from(await fileResp.arrayBuffer()).toString("utf8");
       const lines = text.split(/\r?\n/).filter(Boolean);
 
@@ -1108,7 +587,11 @@ export async function pollBatchAndIngest(jobId: string) {
           }
           const resp = obj.response;
           const caption = extractTextFromResponse(resp);
-          if (customId && typeof caption === "string" && caption.trim().length) {
+          if (
+            customId &&
+            typeof caption === "string" &&
+            caption.trim().length
+          ) {
             await prisma.imageCaption.update({
               where: { id: customId },
               data: { preCaption: caption, status: "CAPTIONED" },
@@ -1154,17 +637,201 @@ export async function pollBatchAndIngest(jobId: string) {
       };
     }
 
-    // Non-terminal states pass through
+    // Non-terminal states pass through (normalize to RUNNING / BATCH_SUBMITTED where helpful)
+    // Normalize status defensively without using any
+    const statusVal = (batch as { status?: unknown }).status;
+    const rawStatus =
+      typeof statusVal === "string" ? statusVal : String(statusVal);
+    const mappedStatus = (() => {
+      switch (rawStatus) {
+        case "in_progress":
+        case "validating":
+        case "finalizing":
+          return "RUNNING";
+        case "completed":
+          return "COMPLETED";
+        case "failed":
+          return "FAILED";
+        case "cancelled":
+          return "CANCELLED";
+        default:
+          return rawStatus;
+      }
+    })();
     return {
       success: true,
       data: {
-        status: batch.status,
+        status: mappedStatus,
         processed: job.processed,
         failed: job.failed,
         total: job.totalImages,
       },
     };
   } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { success: false, error: msg };
+  }
+}
+
+export async function recreateFailedCaptionBatch(
+  jobId: string,
+  prompt: string = "Write a concise, descriptive caption for this image.",
+  model = process.env.OPENAI_MODEL || "gpt-4o-mini"
+) {
+  try {
+    if (!jobId) return { success: false, error: "jobId is required" };
+    const job = await prisma.imageJob.findUnique({ where: { id: jobId } });
+    if (!job) return { success: false, error: "Job not found" };
+
+    // Select only FAILED captions that still have an uploaded file reference
+    const failedCaps = await prisma.imageCaption.findMany({
+      where: { jobId, status: "FAILED", openaiFileId: { not: null } },
+      select: { id: true, openaiFileId: true },
+    });
+    if (failedCaps.length === 0)
+      return {
+        success: false,
+        error: "No failed items with uploaded files to recreate",
+      };
+
+    const tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "jsonl-"));
+    const jsonlPath = path.join(tmpDir, `retry-batch-${jobId}.jsonl`);
+
+    const lines = failedCaps.map((c) =>
+      JSON.stringify({
+        custom_id: c.id,
+        method: "POST",
+        url: "/v1/responses",
+        body: {
+          model,
+          input: [
+            {
+              role: "user",
+              content: [
+                { type: "input_text", text: prompt },
+                { type: "input_image", image: { id: c.openaiFileId } },
+              ],
+            },
+          ],
+          max_output_tokens: 300,
+        },
+      })
+    );
+    await fs.promises.writeFile(jsonlPath, lines.join("\n"), "utf8");
+    const openai = getOpenAIClient();
+    const uploaded = await openai.files.create({
+      file: fs.createReadStream(jsonlPath),
+      purpose: "batch",
+    });
+    const batch = await openai.batches.create({
+      input_file_id: uploaded.id,
+      endpoint: "/v1/responses",
+      completion_window: "24h",
+    });
+    await prisma.imageJob.update({
+      where: { id: jobId },
+      data: { batchId: batch.id, status: "BATCH_SUBMITTED", failed: 0 },
+    });
+    // Reset status of those captions to indicate retry pending
+    await prisma.imageCaption.updateMany({
+      where: { id: { in: failedCaps.map((c) => c.id) } },
+      data: { status: "CAPTIONED" }, // back to uploaded state (could define RETRYING if desired)
+    });
+    return { success: true, data: { batchId: batch.id } };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { success: false, error: msg };
+  }
+}
+
+export async function ingestBatchOutput(jobId: string) {
+  try {
+    if (!jobId) return { success: false, error: "jobId is required" };
+    const job = await prisma.imageJob.findUnique({ where: { id: jobId } });
+    if (!job) return { success: false, error: "Job not found" };
+    if (!job.batchId) return { success: false, error: "Batch not associated with job" };
+
+    // Allow ingestion only if status suggests batch finished
+    if (!["COMPLETED", "SUCCESSFUL"].includes(job.status)) {
+      return { success: false, error: "Batch not completed yet" };
+    }
+
+    const openai = getOpenAIClient();
+    const batch = await openai.batches.retrieve(job.batchId);
+    const outputFileId = (batch as unknown as { output_file_id?: string })?.output_file_id;
+    if (!outputFileId) return { success: false, error: "No output file present for batch" };
+
+    const fileResp = await openai.files.content(outputFileId);
+    const text = Buffer.from(await fileResp.arrayBuffer()).toString("utf8");
+    const lines = text.split(/\r?\n/).filter(Boolean);
+
+    const successIds = new Set<string>();
+    const failedIds = new Set<string>();
+
+    for (const line of lines) {
+      try {
+        const obj = JSON.parse(line);
+        const customId: string | undefined = obj.custom_id;
+        if (!customId) {
+          failedIds.add("__unknown__");
+          continue;
+        }
+        if (obj.error) {
+          failedIds.add(customId);
+          continue;
+        }
+        const caption = extractTextFromResponse(obj.response);
+        if (caption && caption.trim().length) {
+          await prisma.imageCaption.update({
+            where: { id: customId },
+            data: { preCaption: caption, status: "CAPTIONED" },
+          });
+          successIds.add(customId);
+        } else {
+          failedIds.add(customId);
+        }
+      } catch {
+        failedIds.add("__parse__");
+      }
+    }
+
+    // Mark any remaining captions (referenced by job) that were not found as failed
+    const allCaps = await prisma.imageCaption.findMany({
+      where: { jobId },
+      select: { id: true },
+    });
+    for (const c of allCaps) {
+      if (!successIds.has(c.id) && !failedIds.has(c.id)) failedIds.add(c.id);
+    }
+    if (failedIds.size) {
+      // Exclude synthetic markers before DB update
+      const concreteFailed = Array.from(failedIds).filter(
+        (f) => !f.startsWith("__")
+      );
+      if (concreteFailed.length) {
+        await prisma.imageCaption.updateMany({
+          where: { id: { in: concreteFailed } },
+          data: { status: "FAILED" },
+        });
+      }
+    }
+
+    const processed = successIds.size;
+    const failed = Array.from(failedIds).filter((f) => !f.startsWith("__")).length;
+    await prisma.imageJob.update({
+      where: { id: jobId },
+      data: {
+        processed,
+        failed,
+        status: "SUCCESSFUL",
+      },
+    });
+
+    return {
+      success: true,
+      data: { processed, failed, total: job.totalImages, status: "SUCCESSFUL" },
+    };
+  } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return { success: false, error: msg };
   }
