@@ -39,13 +39,13 @@ interface PreparationState {
 
 const preparationStates: Map<string, PreparationState> = new Map();
 
-function updatePreparationState(jobId: string, updater: (prev: PreparationState) => PreparationState) {
-  const prev = preparationStates.get(jobId);
-  if (!prev) return;
-  const next = updater(prev);
-  next.updatedAt = Date.now();
-  preparationStates.set(jobId, next);
-}
+// function updatePreparationState(jobId: string, updater: (prev: PreparationState) => PreparationState) {
+//   const prev = preparationStates.get(jobId);
+//   if (!prev) return;
+//   const next = updater(prev);
+//   next.updatedAt = Date.now();
+//   preparationStates.set(jobId, next);
+// }
 
 function computeEtaSeconds(state: PreparationState): number | null {
   if (!state.uploaded || state.uploaded <= 0) return null;
