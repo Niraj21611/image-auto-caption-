@@ -688,9 +688,9 @@ export async function ingestBatchOutput(jobId: string) {
     }
 
     const openai = getOpenAIClient();
-    const batch = await openai.batches.retrieve(job.batchId);
-    const outputFileId = (batch as unknown as { output_file_id?: string })?.output_file_id;
-    if (!outputFileId) return { success: false, error: "No output file present for batch" };
+  const batch = await openai.batches.retrieve(job.batchId);
+  const outputFileId = (batch as unknown as { output_file_id?: string })?.output_file_id;
+  if (!outputFileId) return { success: false, error: "No output file present for batch" };
 
     const fileResp = await openai.files.content(outputFileId);
     const text = Buffer.from(await fileResp.arrayBuffer()).toString("utf8");
