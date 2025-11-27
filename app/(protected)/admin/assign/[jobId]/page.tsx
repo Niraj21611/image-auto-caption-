@@ -55,6 +55,8 @@ export default function AdminUserAssignPage() {
   const [totalPages, setTotalPages] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(70);
+  const [statusFilter, setStatusFilter] = useState<"CAPTIONED" | "REVIEWED" | "APPROVED" | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [hasFetched, setHasFetched] = useState(false);
   const [bulkApproving, setBulkApproving] = useState(false);
@@ -62,12 +64,10 @@ export default function AdminUserAssignPage() {
   const [approvingId, setApprovingId] = useState<string | null>(null);
   const [rejectingId, setRejectingId] = useState<string | null>(null);
 
-  const PAGE_SIZE = 12;
-
   useEffect(() => {
     setPage(1);
     setSelectedIds(new Set());
-  }, [jobId]);
+  }, [jobId, pageSize, statusFilter]);
 
   const loadOverview = useCallback(async () => {
     if (!jobId) return;
@@ -82,7 +82,7 @@ export default function AdminUserAssignPage() {
     async (targetPage: number) => {
       if (!jobId) return;
       try {
-        const res = await getProcessedCaptionsPage(jobId, targetPage, PAGE_SIZE);
+        const res = await getProcessedCaptionsPage(jobId, targetPage, pageSize, statusFilter || undefined);
         if (res.success && res.data) {
           const {
             items,
@@ -109,7 +109,7 @@ export default function AdminUserAssignPage() {
         setHasFetched(true);
       }
     },
-    [jobId, PAGE_SIZE]
+    [jobId, pageSize, statusFilter]
   );
 
   const loadPageData = useCallback(
@@ -353,6 +353,65 @@ export default function AdminUserAssignPage() {
             />
           </div>
         )}
+
+        {/* Filters & Page Size */}
+        <div className="bg-white rounded-lg border border-neutral-200 p-4 shadow-sm">
+          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-neutral-700">Filter by Status</label>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  variant={statusFilter === null ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setStatusFilter(null)}
+                  className={statusFilter === null ? "bg-blue-600 hover:bg-blue-700" : ""}
+                >
+                  All
+                </Button>
+                <Button
+                  variant={statusFilter === "CAPTIONED" ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setStatusFilter("CAPTIONED")}
+                  className={statusFilter === "CAPTIONED" ? "bg-blue-600 hover:bg-blue-700" : ""}
+                >
+                  Captioned
+                </Button>
+                <Button
+                  variant={statusFilter === "REVIEWED" ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setStatusFilter("REVIEWED")}
+                  className={statusFilter === "REVIEWED" ? "bg-blue-600 hover:bg-blue-700" : ""}
+                >
+                  Reviewed
+                </Button>
+                <Button
+                  variant={statusFilter === "APPROVED" ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setStatusFilter("APPROVED")}
+                  className={statusFilter === "APPROVED" ? "bg-blue-600 hover:bg-blue-700" : ""}
+                >
+                  Approved
+                </Button>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <label htmlFor="pageSize" className="text-sm font-medium text-neutral-700">
+                Entries per Page
+              </label>
+              <select
+                id="pageSize"
+                value={pageSize}
+                onChange={(e) => setPageSize(Number(e.target.value))}
+                className="block w-full md:w-32 rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              >
+                <option value={20}>20</option>
+                <option value={50}>50</option>
+                <option value={70}>70</option>
+                <option value={100}>100</option>
+              </select>
+            </div>
+          </div>
+        </div>
 
         {/* Approve All */}
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">

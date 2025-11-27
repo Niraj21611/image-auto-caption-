@@ -171,19 +171,25 @@ export async function getProcessedCaptionsForUser(jobId: string) {
 export async function getProcessedCaptionsPage(
   jobId: string,
   page = 1,
-  pageSize = 12
+  pageSize = 70,
+  statusFilter?: "CAPTIONED" | "REVIEWED" | "APPROVED" | null
 ) {
   if (!jobId) return { success: false, error: "jobId is required" };
 
   const safePage = Math.max(1, Number(page) || 1);
-  const safePageSize = Math.max(1, Math.min(Number(pageSize) || 12, 100));
+  const safePageSize = Math.max(1, Math.min(Number(pageSize) || 70, 100));
   const skip = (safePage - 1) * safePageSize;
 
   try {
+    const where: Prisma.ImageCaptionWhereInput = { jobId };
+    if (statusFilter) {
+      where.status = statusFilter;
+    }
+
     const [totalCount, items] = await Promise.all([
-      prisma.imageCaption.count({ where: { jobId } }),
+      prisma.imageCaption.count({ where }),
       prisma.imageCaption.findMany({
-        where: { jobId },
+        where,
         orderBy: { createdAt: "asc" },
         skip,
         take: safePageSize,

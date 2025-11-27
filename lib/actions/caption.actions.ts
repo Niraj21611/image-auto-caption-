@@ -415,9 +415,7 @@ export async function createCaptionBatch(
               content: [
                 {
                   type: "input_text",
-                  text:
-                    prompt ||
-                    "Write a concise, descriptive caption for this image.",
+                  text: "Describe the full scene with a clear, factual caption in 15 words or fewer, covering all key visible elements",
                 },
                 {
                   type: "input_image",
