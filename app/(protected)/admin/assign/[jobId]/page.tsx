@@ -58,7 +58,6 @@ export default function AdminUserAssignPage() {
   const [pageSize, setPageSize] = useState(70);
   const [statusFilter, setStatusFilter] = useState<"CAPTIONED" | "REVIEWED" | "APPROVED" | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [hasFetched, setHasFetched] = useState(false);
   const [bulkApproving, setBulkApproving] = useState(false);
   const [approvingAll, setApprovingAll] = useState(false);
   const [approvingId, setApprovingId] = useState<string | null>(null);
@@ -105,8 +104,6 @@ export default function AdminUserAssignPage() {
       } catch (err) {
         console.error("Error loading captions page:", err);
         toast.error("Failed to load captions");
-      } finally {
-        setHasFetched(true);
       }
     },
     [jobId, pageSize, statusFilter]
@@ -229,22 +226,6 @@ export default function AdminUserAssignPage() {
       <div className="flex items-center justify-center h-64 text-blue-600">
         <Loader2 className="w-6 h-6 animate-spin mr-2" />
         Loading data...
-      </div>
-    );
-  }
-
-  if (!loading && hasFetched && totalCount === 0) {
-    return (
-      <div className="p-6 text-center">
-        <h2 className="text-xl font-semibold text-neutral-900">
-          All captions are approved
-        </h2>
-        <Link
-          href="/admin/assign"
-          className="text-blue-600 hover:underline mt-2 inline-block"
-        >
-          Back to assignments
-        </Link>
       </div>
     );
   }
@@ -455,8 +436,32 @@ export default function AdminUserAssignPage() {
 
         {/* Captions Grid */}
         {captions.length === 0 ? (
-          <div className="bg-white border border-neutral-200 rounded-lg p-8 text-center text-neutral-600">
-            No processed images yet.
+          <div className="bg-white border border-neutral-200 rounded-lg p-12 text-center">
+            <div className="flex flex-col items-center justify-center space-y-3">
+              <div className="w-16 h-16 bg-neutral-100 rounded-full flex items-center justify-center">
+                <Images className="w-8 h-8 text-neutral-400" />
+              </div>
+              <h3 className="text-lg font-semibold text-neutral-900">
+                {statusFilter 
+                  ? `No ${statusFilter.toLowerCase()} images found`
+                  : "No images to display"}
+              </h3>
+              <p className="text-sm text-neutral-600 max-w-md">
+                {statusFilter 
+                  ? `There are no images with "${statusFilter.toLowerCase()}" status in this batch. Try selecting a different filter.`
+                  : "No processed images available yet. Please check back later."}
+              </p>
+              {statusFilter && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setStatusFilter(null)}
+                  className="mt-2"
+                >
+                  Clear Filter
+                </Button>
+              )}
+            </div>
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">

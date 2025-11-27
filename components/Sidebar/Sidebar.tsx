@@ -46,7 +46,7 @@ export default function Sidebar() {
           { title: "User Management", url: "/admin/user", icon: Users },
           { title: "Assign Batch", url: "/admin/assign", icon: UserPlus },
           { title: "Process Batch", url: "/admin/process", icon: Workflow },
-          { title: "Approve Batch", url: "/admin/approve", icon: Verified },
+          { title: "Track Batch", url: "/admin/approve", icon: Verified },
           // { title: "Settings", url: "/admin/setting", icon: Settings },
         ]
       : [

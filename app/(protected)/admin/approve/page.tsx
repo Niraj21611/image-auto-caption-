@@ -8,6 +8,8 @@ import {
   Image as ImageIcon,
 } from "lucide-react";
 
+export const dynamic = "force-dynamic";
+
 export default async function ApprovePage() {
   const jobs = await listCompletedJobs();
 
@@ -19,10 +21,10 @@ export default async function ApprovePage() {
           <div className="flex items-center h-16">
             <div>
               <h1 className="text-lg font-semibold text-foreground">
-                Approve Batches
+                Track Batches
               </h1>
               <p className="text-sm text-muted-foreground">
-                Review and approve completed image batches
+                Review and track completed image batches
               </p>
             </div>
           </div>
@@ -117,7 +119,9 @@ export default async function ApprovePage() {
                           </p>
                         </div>
                         <div>
-                          <p className="text-xs text-neutral-500">Assigned To</p>
+                          <p className="text-xs text-neutral-500">
+                            Assigned To
+                          </p>
                           <p className="text-sm font-medium text-neutral-700">
                             {job.assignedUser?.name || "Unassigned"}
                           </p>
@@ -129,7 +133,9 @@ export default async function ApprovePage() {
                         <div>
                           <div className="flex items-center justify-between text-xs text-neutral-600 mb-1">
                             <span>Processing Progress</span>
-                            <span className="font-medium">{processProgress}%</span>
+                            <span className="font-medium">
+                              {processProgress}%
+                            </span>
                           </div>
                           <div className="w-full bg-gray-200 rounded-full h-2">
                             <div
@@ -141,7 +147,9 @@ export default async function ApprovePage() {
                         <div>
                           <div className="flex items-center justify-between text-xs text-neutral-600 mb-1">
                             <span>Review Progress</span>
-                            <span className="font-medium">{reviewProgress}%</span>
+                            <span className="font-medium">
+                              {reviewProgress}%
+                            </span>
                           </div>
                           <div className="w-full bg-gray-200 rounded-full h-2">
                             <div
