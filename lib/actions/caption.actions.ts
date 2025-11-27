@@ -133,7 +133,7 @@ export async function getHistory(limit = 50) {
       jobs.map((j) =>
         limiter(async () => {
           let status = j.status;
-          const processed = j.processed; 
+          const processed = j.processed;
           const total = j.totalImages;
 
           const mapStatus = (s: string): string => {
@@ -164,9 +164,8 @@ export async function getHistory(limit = 50) {
                   data: { status },
                 });
               }
-                }
-          } catch {
-          }
+            }
+          } catch {}
 
           return {
             jobId: j.id,
@@ -463,28 +462,35 @@ export async function createCaptionBatch(
 /* eslint-disable @typescript-eslint/no-explicit-any */
 function extractTextFromResponse(resp: unknown): string {
   try {
-    const r = resp as Record<string, unknown> | undefined;
-    // New SDK may include convenience field
-    if (r && typeof (r as any).output_text === "string")
-      return String((r as any).output_text);
-    const output = (r as any)?.output;
+    const r = resp as any;
+
+    if (typeof r?.output_text === "string") return r.output_text;
+
+    const output = r?.output ?? r?.body?.output;
+
     if (Array.isArray(output)) {
       for (const item of output) {
-        const content = (item as any)?.content;
+        const content = item?.content;
+
         if (Array.isArray(content)) {
           for (const part of content) {
-            const p: any = part;
-            if (p?.type === "output_text" && typeof p?.text === "string")
-              return p.text;
-            if (p?.type === "text" && typeof p?.text === "string")
-              return p.text;
+            if (part?.type === "output_text" && typeof part?.text === "string")
+              return part.text;
+
+            if (part?.type === "text" && typeof part?.text === "string")
+              return part.text;
           }
         }
+
+        if (typeof item?.text === "string") return item.text;
+        if (typeof item?.output_text === "string") return item.output_text;
       }
     }
   } catch {}
+
   return "";
 }
+
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
 export async function pollBatchAndIngest(jobId: string) {
@@ -681,16 +687,19 @@ export async function ingestBatchOutput(jobId: string) {
     if (!jobId) return { success: false, error: "jobId is required" };
     const job = await prisma.imageJob.findUnique({ where: { id: jobId } });
     if (!job) return { success: false, error: "Job not found" };
-    if (!job.batchId) return { success: false, error: "Batch not associated with job" };
+    if (!job.batchId)
+      return { success: false, error: "Batch not associated with job" };
 
     if (!["COMPLETED", "SUCCESSFUL"].includes(job.status)) {
       return { success: false, error: "Batch not completed yet" };
     }
 
     const openai = getOpenAIClient();
-  const batch = await openai.batches.retrieve(job.batchId);
-  const outputFileId = (batch as unknown as { output_file_id?: string })?.output_file_id;
-  if (!outputFileId) return { success: false, error: "No output file present for batch" };
+    const batch = await openai.batches.retrieve(job.batchId);
+    const outputFileId = (batch as unknown as { output_file_id?: string })
+      ?.output_file_id;
+    if (!outputFileId)
+      return { success: false, error: "No output file present for batch" };
 
     const fileResp = await openai.files.content(outputFileId);
     const text = Buffer.from(await fileResp.arrayBuffer()).toString("utf8");
@@ -748,7 +757,9 @@ export async function ingestBatchOutput(jobId: string) {
     }
 
     const processed = successIds.size;
-    const failed = Array.from(failedIds).filter((f) => !f.startsWith("__")).length;
+    const failed = Array.from(failedIds).filter(
+      (f) => !f.startsWith("__")
+    ).length;
     await prisma.imageJob.update({
       where: { id: jobId },
       data: {
