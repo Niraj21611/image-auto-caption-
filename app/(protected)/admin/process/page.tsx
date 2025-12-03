@@ -29,6 +29,8 @@ import {
   getPreparationStatus,
   recreateFailedCaptionBatch,
   ingestBatchOutput,
+  cancelPreparation,
+  resumePreparation,
 } from "@/lib/actions/caption.actions";
 import { toast } from "sonner";
 
@@ -68,6 +70,7 @@ function normalizeStatus(status?: string | null) {
   if (upper.includes("PREPARING")) return "PREPARING";
   if (upper === "READY") return "READY";
   if (upper === "FAILED") return "FAILED";
+  if (upper === "CANCELLED" || upper === "CANCELED") return "CANCELLED";
   if (upper === "COMPLETED") return "COMPLETED";
   if (upper === "BATCH_SUBMITTED") return "BATCH_SUBMITTED";
   if (
@@ -140,6 +143,14 @@ export default function ProcessPage() {
           text: "text-teal-900",
           badge: "bg-teal-100 text-teal-800",
         };
+      case "CANCELLED":
+        return {
+          card: "from-gray-50 to-slate-50 border-gray-200",
+          meterBg: "bg-gray-100",
+          meterFill: "bg-gray-400",
+          text: "text-gray-900",
+          badge: "bg-gray-100 text-gray-800",
+        };
       case "BATCH_SUBMITTED":
         return {
           card: "from-sky-50 to-blue-50 border-sky-200",
@@ -178,6 +189,8 @@ export default function ProcessPage() {
         return "Completed";
       case "SUCCESSFUL":
         return "Ingested";
+      case "CANCELLED":
+        return "Cancelled";
       case "BATCH_SUBMITTED":
         return "Batch submitted";
       case "RUNNING":
@@ -205,6 +218,8 @@ export default function ProcessPage() {
         return "Batch finished. Manual ingestion may still be pending.";
       case "SUCCESSFUL":
         return "Output file ingested. Captions populated.";
+      case "CANCELLED":
+        return "Preparation was cancelled. You can resume to continue uploading remaining images.";
       default:
         return "Processing batch.";
     }
@@ -422,6 +437,63 @@ export default function ProcessPage() {
     }
   };
 
+  const cancelPrep = async () => {
+    if (!jobId) {
+      toast.error("No job in progress to cancel");
+      return;
+    }
+    try {
+      const res = await cancelPreparation(jobId);
+      if (!res.success) {
+        toast.error(res.error || "Failed to cancel preparation");
+        return;
+      }
+      stopPrepWatcher();
+      setProgress((prev) => ({
+        processed: prev?.processed ?? 0,
+        total: prev?.total ?? imageCount ?? 0,
+        failed: prev?.failed ?? 0,
+        status: "CANCELLED",
+        etaSeconds: null,
+      }));
+      toast.success("Preparation cancelled");
+      await fetchHistory();
+    } catch (err) {
+      console.error("cancelPreparation error", err);
+      toast.error("Failed to cancel preparation");
+    }
+  };
+
+  const resumePrep = async (targetJobId?: string) => {
+    const idToUse = targetJobId || jobId;
+    if (!idToUse) {
+      toast.error("No job to resume");
+      return;
+    }
+    try {
+      const res = await resumePreparation(idToUse);
+      if (!res.success || !res.data) {
+        toast.error(res.error || "Failed to resume preparation");
+        return;
+      }
+      setJobId(idToUse);
+      setImageCount(res.data.total ?? imageCount ?? null);
+      setProgress((prev) => ({
+        processed: prev?.processed ?? 0,
+        total: res.data.total ?? prev?.total ?? 0,
+        failed: 0,
+        status: "PREPARING",
+        etaSeconds: null,
+      }));
+      startPreparationWatcher(idToUse, res.data.total ?? 0);
+      toast.success("Resumed preparation");
+      await fetchHistory();
+    } catch (err) {
+      console.error("resumePreparation error", err);
+      toast.error("Failed to resume preparation");
+    }
+  };
+
   const createFromHistory = async (targetJobId: string) => {
     if (!targetJobId) return;
     setIsSubmitting(true);
@@ -633,6 +705,28 @@ export default function ProcessPage() {
                       </Button>
                     </div>
                   )}
+                  {statusKey === "PREPARING" && (
+                    <div className="mt-2 flex flex-wrap items-center gap-3">
+                      <Button
+                        size="sm"
+                        onClick={cancelPrep}
+                        className="gap-2 bg-gray-600 hover:bg-gray-700 text-white"
+                      >
+                        <XCircle className="w-3 h-3" /> Cancel
+                      </Button>
+                    </div>
+                  )}
+                  {statusKey === "CANCELLED" && (
+                    <div className="mt-2 flex flex-wrap items-center gap-3">
+                      <Button
+                        size="sm"
+                        onClick={() => resumePrep()}
+                        className="gap-2 bg-blue-600 hover:bg-blue-700 text-white"
+                      >
+                        <RotateCw className="w-3 h-3" /> Resume
+                      </Button>
+                    </div>
+                  )}
                   {statusKey === "READY" && (
                     <div className="mt-2 flex flex-wrap items-center gap-3">
                       <p className="text-sm text-green-800">
@@ -790,6 +884,8 @@ export default function ProcessPage() {
                                         ? "bg-red-100 text-red-700"
                                         : h.status === "READY"
                                           ? "bg-emerald-100 text-emerald-700"
+                                          : h.status === "CANCELLED"
+                                            ? "bg-gray-100 text-gray-700"
                                           : "bg-gray-100 text-gray-700"
                               }`}
                             >
@@ -798,6 +894,29 @@ export default function ProcessPage() {
                                 <span className="ml-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-teal-200 text-teal-900">Ingested</span>
                               )}
                             </span>
+                            {h.status === "PREPARING" && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => {
+                                  setJobId(h.jobId);
+                                  cancelPrep();
+                                }}
+                                className="gap-2"
+                              >
+                                <XCircle className="w-3 h-3" /> Cancel
+                              </Button>
+                            )}
+                            {h.status === "CANCELLED" && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => resumePrep(h.jobId)}
+                                className="gap-2"
+                              >
+                                <RotateCw className="w-3 h-3" /> Resume
+                              </Button>
+                            )}
                             {h.status === "COMPLETED" && h.processed === 0 && (
                               <Button
                                 size="sm"

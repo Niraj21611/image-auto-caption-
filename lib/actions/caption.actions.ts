@@ -24,7 +24,7 @@ interface JobState {
 
 const jobs: Map<string, JobState> = new Map();
 
-type PreparationPhase = "PREPARING" | "READY" | "FAILED";
+type PreparationPhase = "PREPARING" | "READY" | "FAILED" | "CANCELLED";
 
 interface PreparationState {
   jobId: string;
@@ -38,6 +38,8 @@ interface PreparationState {
 }
 
 const preparationStates: Map<string, PreparationState> = new Map();
+// Cooperative cancel flags per jobId
+const cancelledPrep: Map<string, boolean> = new Map();
 
 function computeEtaSeconds(state: PreparationState): number | null {
   if (!state.uploaded || state.uploaded <= 0) return null;
@@ -231,6 +233,7 @@ export async function prepareAndUpload(dirPath: string) {
       updatedAt: Date.now(),
     };
     preparationStates.set(job.id, initialState);
+    cancelledPrep.set(job.id, false);
 
     void (async () => {
       const openai = getOpenAIClient();
@@ -238,6 +241,8 @@ export async function prepareAndUpload(dirPath: string) {
       const state = { ...initialState };
 
       const uploadFile = async (filePath: string) => {
+        // Skip if cancelled
+        if (cancelledPrep.get(job.id)) return;
         // Ensure ImageCaption row exists first
         const existing = await prisma.imageCaption.findUnique({
           where: { filePath },
@@ -264,6 +269,7 @@ export async function prepareAndUpload(dirPath: string) {
         }
 
         try {
+          if (cancelledPrep.get(job.id)) return;
           const file = await openai.files.create({
             file: fs.createReadStream(filePath),
             purpose: "vision",
@@ -290,6 +296,16 @@ export async function prepareAndUpload(dirPath: string) {
         await Promise.all(
           images.map((filePath) => limit(() => uploadFile(filePath)))
         );
+        if (cancelledPrep.get(job.id)) {
+          state.status = "CANCELLED";
+          state.updatedAt = Date.now();
+          preparationStates.set(job.id, { ...state });
+          await prisma.imageJob.update({
+            where: { id: job.id },
+            data: { status: "CANCELLED" },
+          });
+          return;
+        }
         const finalStatus: PreparationPhase =
           state.uploaded > 0 ? "READY" : "FAILED";
         state.status = finalStatus;
@@ -321,6 +337,125 @@ export async function prepareAndUpload(dirPath: string) {
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     return { success: false, error: msg };
+  }
+}
+
+export async function cancelPreparation(jobId: string) {
+  try {
+    if (!jobId) return { success: false, error: "jobId is required" } as const;
+    const job = await prisma.imageJob.findUnique({ where: { id: jobId }, select: { id: true } });
+    if (!job) return { success: false, error: "Job not found" } as const;
+    cancelledPrep.set(jobId, true);
+    const state = preparationStates.get(jobId);
+    if (state) {
+      state.status = "CANCELLED";
+      state.updatedAt = Date.now();
+      preparationStates.set(jobId, { ...state });
+    }
+    await prisma.imageJob.update({ where: { id: jobId }, data: { status: "CANCELLED" } });
+    return { success: true, data: { jobId, status: "CANCELLED" } } as const;
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("cancelPreparation error:", msg);
+    return { success: false, error: msg || "Failed to cancel preparation" } as const;
+  }
+}
+
+export async function resumePreparation(jobId: string) {
+  try {
+    if (!jobId) return { success: false, error: "jobId is required" } as const;
+    const job = await prisma.imageJob.findUnique({ where: { id: jobId } });
+    if (!job) return { success: false, error: "Job not found" } as const;
+
+    const dirPath = job.dirPath;
+    const stats = await fs.promises.stat(dirPath).catch(() => null);
+    if (!stats || !stats.isDirectory()) {
+      return { success: false, error: "Directory not accessible" } as const;
+    }
+
+    // Determine remaining images to upload (no openaiFileId)
+    const allImages = await listImagesRecursive(dirPath);
+    const caps = await prisma.imageCaption.findMany({
+      where: { filePath: { in: allImages } },
+      select: { id: true, filePath: true, openaiFileId: true },
+    });
+    const uploadedSet = new Set(caps.filter(c => c.openaiFileId).map(c => c.filePath));
+    const remaining = allImages.filter(p => !uploadedSet.has(p));
+
+    const startedAt = Date.now();
+    const initialState: PreparationState = {
+      jobId,
+      dirPath,
+      total: allImages.length,
+      uploaded: caps.filter(c => c.openaiFileId).length,
+      failed: 0,
+      status: "PREPARING",
+      startedAt,
+      updatedAt: startedAt,
+    };
+    preparationStates.set(jobId, initialState);
+    cancelledPrep.set(jobId, false);
+
+    void (async () => {
+      const openai = getOpenAIClient();
+      const limit = pLimit(3);
+      const state = { ...initialState };
+
+      const uploadFile = async (filePath: string) => {
+        if (cancelledPrep.get(jobId)) return;
+        const existing = await prisma.imageCaption.findUnique({ where: { filePath }, select: { id: true } });
+        let capId: string;
+        if (!existing) {
+          const created = await prisma.imageCaption.create({
+            data: { filePath, preCaption: "", postCaption: null, jobId },
+            select: { id: true },
+          });
+          capId = created.id;
+        } else {
+          await prisma.imageCaption.update({ where: { filePath }, data: { jobId } });
+          capId = existing.id;
+        }
+        try {
+          if (cancelledPrep.get(jobId)) return;
+          const file = await openai.files.create({ file: fs.createReadStream(filePath), purpose: "vision" });
+          await prisma.imageCaption.update({ where: { id: capId }, data: { openaiFileId: file.id, status: "CAPTIONED" } });
+          state.uploaded += 1;
+        } catch (err) {
+          state.failed += 1;
+          await prisma.imageCaption.update({ where: { id: capId }, data: { status: "FAILED" } });
+          console.error("Failed to upload image (resume)", filePath, err);
+        } finally {
+          state.updatedAt = Date.now();
+          preparationStates.set(jobId, { ...state });
+        }
+      };
+
+      try {
+        await Promise.all(remaining.map((p) => limit(() => uploadFile(p))));
+        if (cancelledPrep.get(jobId)) {
+          state.status = "CANCELLED";
+          state.updatedAt = Date.now();
+          preparationStates.set(jobId, { ...state });
+          await prisma.imageJob.update({ where: { id: jobId }, data: { status: "CANCELLED" } });
+          return;
+        }
+        state.status = "READY";
+        state.updatedAt = Date.now();
+        preparationStates.set(jobId, { ...state });
+        await prisma.imageJob.update({ where: { id: jobId }, data: { status: "READY", totalImages: allImages.length } });
+      } catch (err) {
+        state.status = "FAILED";
+        state.updatedAt = Date.now();
+        preparationStates.set(jobId, { ...state });
+        await prisma.imageJob.update({ where: { id: jobId }, data: { status: "FAILED" } });
+        console.error("resumePreparation background failure", err);
+      }
+    })();
+
+    return { success: true, data: { jobId, total: allImages.length, remaining: remaining.length } } as const;
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { success: false, error: msg } as const;
   }
 }
 
@@ -360,6 +495,8 @@ export async function getPreparationStatus(jobId: string) {
         ? "READY"
         : job.status === "FAILED"
         ? "FAILED"
+        : job.status === "CANCELLED"
+        ? "CANCELLED"
         : "PREPARING";
 
     return {
