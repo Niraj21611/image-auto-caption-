@@ -415,6 +415,35 @@ export default function ProcessPage() {
     }
   };
 
+  const createFromHistory = async (targetJobId: string) => {
+    if (!targetJobId) return;
+    setIsSubmitting(true);
+    try {
+      const res = await createCaptionBatch(targetJobId, DEFAULT_PROMPT);
+      if (!res.success || !res.data?.batchId) {
+        toast.error(res.error || "Failed to create batch");
+        return;
+      }
+      toast.success("Batch submitted to OpenAI");
+      setJobId(targetJobId);
+      // When triggered from history, switch status to submitted and start polling
+      setProgress((prev) => ({
+        processed: prev?.processed ?? 0,
+        total: prev?.total ?? 0,
+        failed: prev?.failed ?? 0,
+        status: "BATCH_SUBMITTED",
+        etaSeconds: null,
+      }));
+      startBatchPolling(targetJobId);
+      await fetchHistory();
+    } catch (err) {
+      console.error("createCaptionBatch (history) error", err);
+      toast.error("Failed to create batch");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   const ingestOutput = async (targetJobId: string) => {
     setIngestingJobs((prev) => new Set(prev).add(targetJobId));
     try {
@@ -731,6 +760,24 @@ export default function ProcessPage() {
                                 ) : (
                                   <>
                                     <RotateCw className="w-3 h-3" /> Ingest Output
+                                  </>
+                                )}
+                              </Button>
+                            )}
+                            {h.status === "READY" && (
+                              <Button
+                                size="sm"
+                                onClick={() => createFromHistory(h.jobId)}
+                                disabled={isSubmitting}
+                                className="gap-2 bg-green-600 hover:bg-green-700 text-white"
+                              >
+                                {isSubmitting ? (
+                                  <>
+                                    <Loader2 className="w-3 h-3 animate-spin" /> Creating...
+                                  </>
+                                ) : (
+                                  <>
+                                    <Send className="w-3 h-3" /> Create Batch
                                   </>
                                 )}
                               </Button>
