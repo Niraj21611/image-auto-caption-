@@ -6,7 +6,7 @@ import { ChevronLeft, ChevronRight, CheckCircle2, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { getCaptionsPage, submitReview } from "@/lib/actions/review.actions";
+import { getCaptionsPage, submitReview, skipReview } from "@/lib/actions/review.actions";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
@@ -113,6 +113,41 @@ export default function ReviewClient({
     } catch (err) {
       toast.error("Failed to submit review");
       console.error(err);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleSkip = async () => {
+    if (!currentCaption) return;
+    setIsSubmitting(true);
+    try {
+      // Optimistically update UI
+      const skippedId = currentCaption.id;
+      setCaptions((prev) => {
+        const next = [...prev];
+        const idx = next.findIndex((c) => c.id === skippedId);
+        if (idx !== -1) {
+          next[idx] = { ...next[idx], status: "SKIPPED", postCaption: null };
+        }
+        return next;
+      });
+      setTotalPending((t) => Math.max(0, t - 1));
+
+      const res = await skipReview(currentCaption.id, selectedJob.id);
+      if (!res.success) {
+        toast.error(res.error || "Failed to skip image");
+      }
+
+      // Move to next image or next page
+      if (selectedIndex < captions.length - 1) {
+        setSelectedIndex(selectedIndex + 1);
+      } else {
+        await loadPage(currentPage, selectedJob.id);
+      }
+    } catch (err) {
+      console.error("Failed to skip image", err);
+      toast.error("Failed to skip image");
     } finally {
       setIsSubmitting(false);
     }
@@ -300,30 +335,41 @@ export default function ReviewClient({
 
               {/* Submit Button */}
               <div className="p-6 border-t border-neutral-200">
-                <Button
-                  onClick={handleSubmit}
-                  disabled={
-                    isSubmitting ||
-                    !postCaption.trim() ||
-                    currentCaption.status === "REVIEWED"
-                  }
-                  className="w-full bg-blue-600 hover:bg-blue-700 font-medium"
-                  size="lg"
-                >
-                  {isSubmitting ? (
-                    <>
-                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                      Submitting...
-                    </>
-                  ) : (
-                    <>
-                      <CheckCircle2 className="w-4 h-4 mr-2" />
-                      {currentCaption.status === "REVIEWED"
-                        ? "Already Reviewed"
-                        : "Submit Review"}
-                    </>
-                  )}
-                </Button>
+                <div className="flex gap-3">
+                  <Button
+                    variant="outline"
+                    onClick={handleSkip}
+                    disabled={isSubmitting}
+                    className="w-1/3 border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700"
+                    size="lg"
+                  >
+                    Skip Image
+                  </Button>
+                  <Button
+                    onClick={handleSubmit}
+                    disabled={
+                      isSubmitting ||
+                      !postCaption.trim() ||
+                      currentCaption.status === "REVIEWED"
+                    }
+                    className="w-2/3 bg-blue-600 hover:bg-blue-700 font-medium"
+                    size="lg"
+                  >
+                    {isSubmitting ? (
+                      <>
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        Submitting...
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle2 className="w-4 h-4 mr-2" />
+                        {currentCaption.status === "REVIEWED"
+                          ? "Already Reviewed"
+                          : "Submit Review"}
+                      </>
+                    )}
+                  </Button>
+                </div>
                 <div className="mt-2 text-xs text-center text-neutral-500">
                   {selectedIndex + 1} of {captions.length} in current page
                 </div>

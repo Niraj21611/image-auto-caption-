@@ -21,6 +21,8 @@ import {
   getProcessedCaptionsPage,
   getUserBatchOverview,
   rejectCaption,
+  exportAllCaptions,
+  exportReviewedCaptions,
 } from "@/lib/actions/assignment.actions";
 import { toast } from "sonner";
 
@@ -36,7 +38,7 @@ export type ProcessedCaption = {
   filePath: string;
   preCaption: string | null;
   postCaption: string | null;
-  status: "CAPTIONED" | "REVIEWED" | "APPROVED" | "FAILED";
+  status: "CAPTIONED" | "REVIEWED" | "APPROVED" | "FAILED" | "SKIPPED";
   jobId: string | null;
   createdAt: Date;
 };
@@ -196,6 +198,51 @@ export default function AdminUserAssignPage() {
     }
   };
 
+  // CSV download helper
+  const downloadCsv = async (filename: string, csv: string) => {
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.setAttribute("download", filename);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleExportAllForJob = async () => {
+    if (!jobId) return;
+    try {
+      const res = await exportAllCaptions(jobId);
+      if (!res.success || !res.data) {
+        toast.error(res.error || "Failed to export");
+        return;
+      }
+      await downloadCsv(`jobId${jobId}_all.csv`, res.data);
+      toast.success("Exported all captions successfully");
+    } catch (err) {
+      console.error("Export all error", err);
+      toast.error("Failed to export");
+    }
+  };
+
+  const handleExportReviewedForJob = async () => {
+    if (!jobId) return;
+    try {
+      const res = await exportReviewedCaptions(jobId);
+      if (!res.success || !res.data) {
+        toast.error(res.error || "Failed to export reviewed");
+        return;
+      }
+      await downloadCsv(`jobId${jobId}_reviewed.csv`, res.data);
+      toast.success("Exported reviewed captions successfully");
+    } catch (err) {
+      console.error("Export reviewed error", err);
+      toast.error("Failed to export reviewed");
+    }
+  };
+
   const handleApproveSelected = async () => {
     if (!selectedIds.size) return;
     try {
@@ -292,7 +339,7 @@ export default function AdminUserAssignPage() {
       </div>
 
       <div className="px-6 space-y-6">
-        {/* User + Job Switcher */}
+        {/* User + Export Buttons */}
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div className="flex items-center gap-3">
             <div className="w-12 h-12 bg-blue-600 rounded-full flex items-center justify-center">
@@ -307,6 +354,27 @@ export default function AdminUserAssignPage() {
               <div className="text-sm text-neutral-600">{user.email}</div>
             </div>
           </div>
+          {/* Export Buttons beside username */}
+          {overview && (
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleExportAllForJob}
+              >
+                Export All
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleExportReviewedForJob}
+                disabled={overview.reviewed === 0}
+                title={overview.reviewed === 0 ? "No reviewed images yet" : undefined}
+              >
+                Export Reviewed
+              </Button>
+            </div>
+          )}
         </div>
 
         {/* Overview Cards */}

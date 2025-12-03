@@ -269,6 +269,86 @@ export async function rejectCaption(captionId: string) {
   }
 }
 
+// --- CSV Export helpers ---
+function toCsvRow(values: (string | number | null | undefined)[]): string {
+  return values
+    .map((v) => {
+      const s = v == null ? "" : String(v);
+      if (/[",\n]/.test(s)) {
+        return `"${s.replace(/"/g, '""')}"`;
+      }
+      return s;
+    })
+    .join(",");
+}
+
+// Export all captions for a job: filePath, preCaption, postCaption, reviewedBy
+export async function exportAllCaptions(jobId: string) {
+  try {
+    if (!jobId) return { success: false, error: "jobId is required" } as const;
+
+    const captions = await prisma.imageCaption.findMany({
+      where: { jobId },
+      orderBy: { createdAt: "asc" },
+      select: {
+        filePath: true,
+        preCaption: true,
+        postCaption: true,
+        reviewer: { select: { name: true, email: true } },
+      },
+    });
+
+    const header = "filePath,preCaption,postCaption,reviewedBy";
+    const rows = captions.map((c) =>
+      toCsvRow([
+        c.filePath,
+        c.preCaption || "",
+        c.postCaption || "",
+        c.reviewer?.name || c.reviewer?.email || "",
+      ])
+    );
+    const csv = [header, ...rows].join("\n");
+
+    return { success: true, data: csv } as const;
+  } catch (err) {
+    console.error("exportAllCaptions error", err);
+    return { success: false, error: "Failed to export captions" } as const;
+  }
+}
+
+export async function exportReviewedCaptions(jobId: string) {
+  try {
+    if (!jobId) return { success: false, error: "jobId is required" } as const;
+
+    const captions = await prisma.imageCaption.findMany({
+      where: { jobId, status: "REVIEWED" },
+      orderBy: { createdAt: "asc" },
+      select: {
+        filePath: true,
+        preCaption: true,
+        postCaption: true,
+        reviewer: { select: { name: true, email: true } },
+      },
+    });
+
+    const header = "filePath,preCaption,postCaption,reviewedBy";
+    const rows = captions.map((c) =>
+      toCsvRow([
+        c.filePath,
+        c.preCaption ?? "",
+        c.postCaption ?? "",
+        c.reviewer?.name || c.reviewer?.email || "",
+      ])
+    );
+    const csv = [header, ...rows].join("\n");
+
+    return { success: true, data: csv } as const;
+  } catch (err) {
+    console.error("exportReviewedCaptions error", err);
+    return { success: false, error: "Failed to export reviewed captions" } as const;
+  }
+}
+
 export async function approveAll(jobId: string) {
   if (!jobId) return { success: false, error: "jobId is required" };
 
@@ -322,3 +402,4 @@ export async function approveCaptionsBulk(captionIds: string[]) {
     return { success: false, error: "Failed to approve selected captions" };
   }
 }
+
