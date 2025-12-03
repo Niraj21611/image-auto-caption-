@@ -1,11 +1,11 @@
 "use server";
 
 import { Prisma } from "@prisma/client";
+import * as XLSX from "xlsx";
 import prisma from "../prisma";
 import { revalidatePath } from "next/cache";
 
 export async function listCompletedJobs() {
-  // Return most recent first, include assigned user info for UI label
   const jobs = await prisma.imageJob.findMany({
     where: { status: "COMPLETED" },
     orderBy: { createdAt: "desc" },
@@ -35,7 +35,6 @@ export async function listUsers() {
 
 export async function assignJob(jobId: string, userId: string) {
   if (!jobId || !userId) throw new Error("jobId and userId are required");
-  // Ensure both exist
   const [job, user] = await Promise.all([
     prisma.imageJob.findUnique({ where: { id: jobId }, select: { id: true } }),
     prisma.user.findUnique({ where: { id: userId }, select: { id: true } }),
@@ -49,12 +48,11 @@ export async function assignJob(jobId: string, userId: string) {
   });
 }
 
-// Form-bound server action for <form action={assignJobAction}>
+
 export async function assignJobAction(formData: FormData) {
   const jobId = String(formData.get("jobId") || "").trim();
   const userId = String(formData.get("userId") || "").trim();
   await assignJob(jobId, userId);
-  // Revalidate both list and the user's detail page
   revalidatePath("/admin/assign");
   if (userId) revalidatePath(`/admin/assign/${userId}`);
 }
@@ -269,20 +267,20 @@ export async function rejectCaption(captionId: string) {
   }
 }
 
-// --- CSV Export helpers ---
-function toCsvRow(values: (string | number | null | undefined)[]): string {
-  return values
-    .map((v) => {
-      const s = v == null ? "" : String(v);
-      if (/[",\n]/.test(s)) {
-        return `"${s.replace(/"/g, '""')}"`;
-      }
-      return s;
-    })
-    .join(",");
-}
+// CSV helper kept for potential future use; currently not used after switching to XLSX
+// function toCsvRow(values: (string | number | null | undefined)[]): string {
+//   return values
+//     .map((v) => {
+//       const s = v == null ? "" : String(v);
+//       if (/[",\n]/.test(s)) {
+//         return `"${s.replace(/"/g, '""')}"`;
+//       }
+//       return s;
+//     })
+//     .join(",");
+// }
 
-// Export all captions for a job: filePath, preCaption, postCaption, reviewedBy
+// Export all captions for a job as .xlsx (base64)
 export async function exportAllCaptions(jobId: string) {
   try {
     if (!jobId) return { success: false, error: "jobId is required" } as const;
@@ -298,30 +296,36 @@ export async function exportAllCaptions(jobId: string) {
       },
     });
 
-    const header = "filePath,preCaption,postCaption,reviewedBy";
-    const rows = captions.map((c) =>
-      toCsvRow([
+    // Build AoA for deterministic column order
+    const aoa: (string | number)[][] = [
+      ["filePath", "preCaption", "postCaption", "reviewedBy"],
+      ...captions.map((c) => [
         c.filePath,
-        c.preCaption || "",
-        c.postCaption || "",
+        c.preCaption ?? "",
+        c.postCaption ?? "",
         c.reviewer?.name || c.reviewer?.email || "",
-      ])
-    );
-    const csv = [header, ...rows].join("\n");
+      ]),
+    ];
 
-    return { success: true, data: csv } as const;
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    XLSX.utils.book_append_sheet(wb, ws, "Export");
+    const base64 = XLSX.write(wb, { type: "base64", bookType: "xlsx" });
+
+    return { success: true, data: base64 } as const;
   } catch (err) {
     console.error("exportAllCaptions error", err);
     return { success: false, error: "Failed to export captions" } as const;
   }
 }
 
+// Export reviewed/approved captions for a job as .xlsx (base64)
 export async function exportReviewedCaptions(jobId: string) {
   try {
     if (!jobId) return { success: false, error: "jobId is required" } as const;
 
     const captions = await prisma.imageCaption.findMany({
-      where: { jobId, status: "REVIEWED" },
+      where: { jobId, status: { in: ["REVIEWED", "APPROVED"] } },
       orderBy: { createdAt: "asc" },
       select: {
         filePath: true,
@@ -331,18 +335,22 @@ export async function exportReviewedCaptions(jobId: string) {
       },
     });
 
-    const header = "filePath,preCaption,postCaption,reviewedBy";
-    const rows = captions.map((c) =>
-      toCsvRow([
+    const aoa: (string | number)[][] = [
+      ["filePath", "preCaption", "postCaption", "reviewedBy"],
+      ...captions.map((c) => [
         c.filePath,
         c.preCaption ?? "",
         c.postCaption ?? "",
         c.reviewer?.name || c.reviewer?.email || "",
-      ])
-    );
-    const csv = [header, ...rows].join("\n");
+      ]),
+    ];
 
-    return { success: true, data: csv } as const;
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    XLSX.utils.book_append_sheet(wb, ws, "Export");
+    const base64 = XLSX.write(wb, { type: "base64", bookType: "xlsx" });
+
+    return { success: true, data: base64 } as const;
   } catch (err) {
     console.error("exportReviewedCaptions error", err);
     return { success: false, error: "Failed to export reviewed captions" } as const;

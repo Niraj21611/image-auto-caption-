@@ -14,8 +14,14 @@ interface ExportButtonsProps {
   reviewed: number;
 }
 
-async function downloadCsv(filename: string, csv: string) {
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+async function downloadXlsx(filename: string, base64: string) {
+  const binary = atob(base64);
+  const len = binary.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) bytes[i] = binary.charCodeAt(i);
+  const blob = new Blob([bytes], {
+    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
@@ -49,8 +55,8 @@ export function ExportButtons({
         toast.error(res.error || "Failed to export");
         return;
       }
-      await downloadCsv(
-        `jobId${jobId}_${allReviewed ? "reviewed" : "all"}.csv`,
+      await downloadXlsx(
+        `jobId${jobId}_${allReviewed ? "reviewed" : "all"}.xlsx`,
         res.data,
       );
       toast.success("Export successful");
@@ -73,8 +79,8 @@ export function ExportButtons({
         toast.error(res.error || "Failed to export reviewed");
         return;
       }
-      await downloadCsv(
-        `jobId${jobId}_reviewed.csv`,
+      await downloadXlsx(
+        `jobId${jobId}_reviewed.xlsx`,
         res.data,
       );
       toast.success("Export successful");

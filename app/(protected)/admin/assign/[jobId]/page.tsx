@@ -198,9 +198,15 @@ export default function AdminUserAssignPage() {
     }
   };
 
-  // CSV download helper
-  const downloadCsv = async (filename: string, csv: string) => {
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  // XLSX download helper (expects base64 string from server)
+  const downloadXlsx = async (filename: string, base64: string) => {
+    const binary = atob(base64);
+    const len = binary.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) bytes[i] = binary.charCodeAt(i);
+    const blob = new Blob([bytes], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
@@ -219,7 +225,7 @@ export default function AdminUserAssignPage() {
         toast.error(res.error || "Failed to export");
         return;
       }
-      await downloadCsv(`jobId${jobId}_all.csv`, res.data);
+  await downloadXlsx(`jobId${jobId}_all.xlsx`, res.data);
       toast.success("Exported all captions successfully");
     } catch (err) {
       console.error("Export all error", err);
@@ -235,7 +241,7 @@ export default function AdminUserAssignPage() {
         toast.error(res.error || "Failed to export reviewed");
         return;
       }
-      await downloadCsv(`jobId${jobId}_reviewed.csv`, res.data);
+  await downloadXlsx(`jobId${jobId}_reviewed.xlsx`, res.data);
       toast.success("Exported reviewed captions successfully");
     } catch (err) {
       console.error("Export reviewed error", err);
