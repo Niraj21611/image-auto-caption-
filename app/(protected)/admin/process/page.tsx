@@ -89,6 +89,8 @@ export default function ProcessPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [progress, setProgress] = useState<ProgressState | null>(null);
   const [history, setHistory] = useState<HistoryRow[]>([]);
+  type HistoryFilter = "ALL" | "READY" | "COMPLETED" | "PREPARING" | "FAILED" | "RUNNING";
+  const [historyFilter, setHistoryFilter] = useState<HistoryFilter>("ALL");
   const [ingestingJobs, setIngestingJobs] = useState<Set<string>>(new Set());
   const [isRefreshing, setIsRefreshing] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -226,6 +228,11 @@ export default function ProcessPage() {
       toast.error("Unable to load history");
     }
   }, []);
+
+  const filteredHistory = useMemo(() => {
+    if (historyFilter === "ALL") return history;
+    return history.filter((h) => normalizeStatus(h.status) === historyFilter);
+  }, [history, historyFilter]);
 
   const handleHistoryRefresh = useCallback(async () => {
     setIsRefreshing(true);
@@ -663,20 +670,66 @@ export default function ProcessPage() {
                 <History className="w-5 h-5 text-gray-600" />
                 <h3 className="text-sm font-semibold text-gray-900">Processing History</h3>
               </div>
-              <Button
-                variant="outline"
-                size="sm"
-                className="gap-2"
-                onClick={handleHistoryRefresh}
-                disabled={isRefreshing}
-              >
-                {isRefreshing ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  <RotateCw className="w-4 h-4" />
-                )}
-                Refresh
-              </Button>
+              <div className="flex items-center gap-2">
+                <div className="hidden md:flex items-center gap-1">
+                  <Button
+                    variant={historyFilter === "ALL" ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setHistoryFilter("ALL")}
+                  >
+                    All
+                  </Button>
+                  <Button
+                    variant={historyFilter === "READY" ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setHistoryFilter("READY")}
+                  >
+                    Ready
+                  </Button>
+                  <Button
+                    variant={historyFilter === "COMPLETED" ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setHistoryFilter("COMPLETED")}
+                  >
+                    Completed
+                  </Button>
+                  <Button
+                    variant={historyFilter === "PREPARING" ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setHistoryFilter("PREPARING")}
+                  >
+                    Preparing
+                  </Button>
+                  <Button
+                    variant={historyFilter === "RUNNING" ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setHistoryFilter("RUNNING")}
+                  >
+                    Running
+                  </Button>
+                  <Button
+                    variant={historyFilter === "FAILED" ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setHistoryFilter("FAILED")}
+                  >
+                    Failed
+                  </Button>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-2"
+                  onClick={handleHistoryRefresh}
+                  disabled={isRefreshing}
+                >
+                  {isRefreshing ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <RotateCw className="w-4 h-4" />
+                  )}
+                  Refresh
+                </Button>
+              </div>
             </div>
           </div>
 
@@ -691,20 +744,20 @@ export default function ProcessPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {history.length === 0 ? (
+                {filteredHistory.length === 0 ? (
                   <TableRow className="hover:bg-transparent">
                     <TableCell colSpan={4} className="py-12 px-6">
                       <div className="flex flex-col items-center justify-center text-center">
                         <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-3">
                           <History className="w-8 h-8 text-gray-400" />
                         </div>
-                        <p className="text-sm font-medium text-gray-900">No processing history yet</p>
-                        <p className="text-xs text-gray-500 mt-1">Start preparing a batch to see history here</p>
+                        <p className="text-sm font-medium text-gray-900">No matching history</p>
+                        <p className="text-xs text-gray-500 mt-1">Try a different filter or refresh</p>
                       </div>
                     </TableCell>
                   </TableRow>
                 ) : (
-                  history.map((h) => {
+                  filteredHistory.map((h) => {
                     const processedDate = new Date(h.createdAt);
                     const now = new Date();
                     const diffMs = now.getTime() - processedDate.getTime();
