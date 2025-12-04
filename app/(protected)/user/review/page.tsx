@@ -62,7 +62,7 @@ export default async function ReviewPage(props: {
   if (initialData.items.length === 0) {
     return (
       <div className="flex flex-col min-h-screen">
-        <BatchHeader summaries={summaries} selectedJobId={selectedJobId} />
+        <BatchHeader summaries={summaries} selectedJobId={selectedJobId} userId={userId} />
 
         <div className="flex-1 flex items-center justify-center p-6">
           <div className="text-center space-y-4">
@@ -76,7 +76,7 @@ export default async function ReviewPage(props: {
 
   return (
     <div className="flex flex-col min-h-screen">
-      <BatchHeader summaries={summaries} selectedJobId={selectedJobId} />
+      <BatchHeader summaries={summaries} selectedJobId={selectedJobId} userId={userId} />
 
       <ReviewClient
         key={selectedJob.id}

@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { getUserDashboardStats } from "@/lib/actions/dashboard.actions";
 import Link from "next/link";
 import CheckInOutControls from "./_components/CheckInOutControls";
+import HeaderCheckInOut from "@/components/Header/HeaderCheckInOut";
 import {
   Calendar,
   Image as ImageIcon,
@@ -52,7 +53,8 @@ async function UserPage() {
                 Welcome back, {stats.user.name || "User"}!
               </p>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-3">
+              <HeaderCheckInOut userId={session.user.id} />
               <Link
                 href="/user/review"
                 className="inline-flex items-center gap-2 rounded-md border border-indigo-200 bg-white px-3 py-2 text-sm font-medium text-indigo-700 transition hover:border-indigo-300 hover:bg-indigo-50"

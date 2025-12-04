@@ -128,6 +128,55 @@ function formatDuration(totalMinutes: number): string {
   return `${hrs} hr${hrs > 1 ? "s" : ""} ${mins} mins`;
 }
 
+// Auto-checkout helper: Check if user has been checked in for more than 9 hours and auto-checkout
+async function autoCheckoutIfStale(userId: string) {
+  try {
+    const now = new Date();
+    const nineHoursAgo = new Date(now.getTime() - 9 * 60 * 60 * 1000); // 9 hours in milliseconds
+
+    // Find all unclosed activities older than 9 hours
+    const staleActivities = await prisma.userActivity.findMany({
+      where: {
+        userId,
+        checkOutAt: null,
+        checkInAt: {
+          lt: nineHoursAgo,
+        },
+      },
+    });
+
+    // Auto-checkout each stale activity
+    for (const activity of staleActivities) {
+      const diff = now.getTime() - activity.checkInAt.getTime();
+      const minutes = Math.min(Math.floor(diff / 60000), 9 * 60); // Cap at 9 hours
+
+      await prisma.userActivity.update({
+        where: { id: activity.id },
+        data: {
+          checkOutAt: now,
+          duration: minutes,
+        },
+      });
+
+      console.log(`[Auto-checkout] Checked out stale activity ${activity.id} for user ${userId}`);
+    }
+
+    // If any stale activities were found, update user's isCheckedIn status
+    if (staleActivities.length > 0) {
+      await prisma.user.update({
+        where: { id: userId },
+        data: { isCheckedIn: false },
+      });
+      console.log(`[Auto-checkout] Updated user ${userId} isCheckedIn to false`);
+    }
+
+    return staleActivities.length;
+  } catch (err) {
+    console.error("[Auto-checkout] Error in autoCheckoutIfStale:", err);
+    return 0;
+  }
+}
+
 // Check-in: Start tracking user activity
 export async function checkIn(userId: string) {
   try {
@@ -139,6 +188,9 @@ export async function checkIn(userId: string) {
     );
 
     console.log("[Server checkIn] Starting check-in for user:", userId);
+
+    // First, check for any stale check-ins (over 9 hours) and auto-checkout
+    await autoCheckoutIfStale(userId);
 
     // Check if user is already checked in
     const user = await prisma.user.findUnique({
@@ -166,7 +218,7 @@ export async function checkIn(userId: string) {
     // If there's an unclosed activity, close it first
     if (unclosedActivity) {
       const diff = now.getTime() - unclosedActivity.checkInAt.getTime();
-      const minutes = Math.min(Math.floor(diff / 60000), 12 * 60);
+      const minutes = Math.min(Math.floor(diff / 60000), 9 * 60); // Cap at 9 hours
       
       console.log("[Server checkIn] Closing unclosed activity with duration:", minutes);
       
@@ -356,6 +408,11 @@ export async function getUsersTodayDurations(userIds: string[]) {
     );
     const endOfDay = new Date(startOfDay);
     endOfDay.setDate(startOfDay.getDate() + 1);
+
+    // Auto-checkout any stale check-ins (over 9 hours) for all users
+    for (const userId of userIds) {
+      await autoCheckoutIfStale(userId);
+    }
 
     // Get all users to check isCheckedIn status
     const users = await prisma.user.findMany({
