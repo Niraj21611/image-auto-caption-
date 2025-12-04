@@ -32,7 +32,16 @@ import {
   cancelPreparation,
   resumePreparation,
 } from "@/lib/actions/caption.actions";
+import { scanMediaFolders } from "@/lib/actions/scan.actions";
 import { toast } from "sonner";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 interface HistoryRow {
   jobId: string;
@@ -41,6 +50,12 @@ interface HistoryRow {
   processed: number;
   total: number;
   createdAt: string;
+}
+
+interface MediaFolderInfo {
+  fullPath: string;
+  relativePath: string;
+  imageCount: number;
 }
 
 interface ProgressState {
@@ -98,6 +113,12 @@ export default function ProcessPage() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const prepPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Scan mode states
+  const [isScanning, setIsScanning] = useState(false);
+  const [scannedFolders, setScannedFolders] = useState<MediaFolderInfo[]>([]);
+  const [selectedFolders, setSelectedFolders] = useState<Set<string>>(new Set());
+  const [showScanModal, setShowScanModal] = useState(false);
 
   const statusKey = useMemo(() => normalizeStatus(progress?.status), [progress?.status]);
 
@@ -249,6 +270,14 @@ export default function ProcessPage() {
     return history.filter((h) => normalizeStatus(h.status) === historyFilter);
   }, [history, historyFilter]);
 
+  const readyJobs = useMemo(() => {
+    return history.filter((h) => normalizeStatus(h.status) === "READY");
+  }, [history]);
+
+  const completedJobsNeedingIngest = useMemo(() => {
+    return history.filter((h) => h.status === "COMPLETED" && h.processed === 0);
+  }, [history]);
+
   const handleHistoryRefresh = useCallback(async () => {
     setIsRefreshing(true);
     try {
@@ -371,6 +400,85 @@ export default function ProcessPage() {
     } finally {
       setIsPreparing(false);
     }
+  };
+
+  const scanFolders = async () => {
+    const pathToUse = dirPath.trim();
+    if (!pathToUse) {
+      toast.error("Root path is required (e.g., root/place)");
+      return;
+    }
+    setIsScanning(true);
+    try {
+      const res = await scanMediaFolders(pathToUse);
+      if (!res.success || !res.data) {
+        toast.error(res.error || "Failed to scan folders");
+        return;
+      }
+      if (res.data.length === 0) {
+        toast.info("No 'media' folders found in the given path");
+        return;
+      }
+      setScannedFolders(res.data);
+      setSelectedFolders(new Set(res.data.map((f) => f.fullPath)));
+      setShowScanModal(true);
+      toast.success(`Found ${res.data.length} media folder(s)`);
+    } catch (err) {
+      console.error("scanFolders error", err);
+      toast.error("Failed to scan folders");
+    } finally {
+      setIsScanning(false);
+    }
+  };
+
+  const prepareSelected = async () => {
+    if (selectedFolders.size === 0) {
+      toast.error("Select at least one folder to prepare");
+      return;
+    }
+    setShowScanModal(false);
+    setIsPreparing(true);
+    try {
+      const foldersToPrep = scannedFolders.filter((f) => selectedFolders.has(f.fullPath));
+      
+      for (const folder of foldersToPrep) {
+        const res = await prepareAndUpload(folder.fullPath);
+        if (!res.success || !res.data?.jobId) {
+          toast.error(`Failed to prepare ${folder.relativePath}: ${res.error || "unknown error"}`);
+          continue;
+        }
+        const { jobId: newJobId, total } = res.data;
+        
+        // Track the first job for primary display
+        if (!jobId) {
+          setJobId(newJobId);
+          setImageCount(total);
+          setProgress({
+            processed: 0,
+            total,
+            status: "PREPARING",
+            failed: 0,
+            etaSeconds: null,
+          });
+          startPreparationWatcher(newJobId, total);
+        }
+        
+        toast.success(`Preparing ${folder.relativePath} (${total} images)`);
+      }
+      
+      await fetchHistory();
+      toast.info(`Prepared ${foldersToPrep.length} folder(s). Check Processing History for status.`);
+    } catch (err) {
+      console.error("prepareSelected error", err);
+      toast.error("Failed to prepare selected folders");
+    } finally {
+      setIsPreparing(false);
+    }
+  };
+
+  const prepareAll = async () => {
+    setSelectedFolders(new Set(scannedFolders.map((f) => f.fullPath)));
+    await prepareSelected();
   };
 
   const submit = async () => {
@@ -545,6 +653,67 @@ export default function ProcessPage() {
     }
   };
 
+  const createAllReadyBatches = async () => {
+    if (readyJobs.length === 0) return;
+    setIsSubmitting(true);
+    let successCount = 0;
+    try {
+      for (const job of readyJobs) {
+        const res = await createCaptionBatch(job.jobId, DEFAULT_PROMPT);
+        if (res.success) {
+          successCount++;
+        }
+      }
+      toast.success(`Created ${successCount} batch(es) out of ${readyJobs.length}`);
+      await fetchHistory();
+    } catch (err) {
+      console.error("createAllReadyBatches error", err);
+      toast.error("Failed to create all batches");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const ingestAllCompleted = async () => {
+    if (completedJobsNeedingIngest.length === 0) return;
+    const jobIds = completedJobsNeedingIngest.map((j) => j.jobId);
+    setIngestingJobs(new Set(jobIds));
+    let successCount = 0;
+    try {
+      for (const job of completedJobsNeedingIngest) {
+        const res = await ingestBatchOutput(job.jobId);
+        if (res.success) {
+          successCount++;
+        }
+      }
+      toast.success(`Ingested ${successCount} batch(es) out of ${completedJobsNeedingIngest.length}`);
+      await fetchHistory();
+    } catch (err) {
+      console.error("ingestAllCompleted error", err);
+      toast.error("Failed to ingest all batches");
+    } finally {
+      setIngestingJobs(new Set());
+    }
+  };
+
+  const retryFailedBatch = async (targetJobId: string) => {
+    setIsSubmitting(true);
+    try {
+      const res = await recreateFailedCaptionBatch(targetJobId);
+      if (!res.success || !res.data?.batchId) {
+        toast.error(res.error || "Failed to retry batch");
+        return;
+      }
+      toast.success("Batch recreated for failed images");
+      await fetchHistory();
+    } catch (err) {
+      console.error("retryFailedBatch error", err);
+      toast.error("Failed to retry batch");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   const canCreateBatch = Boolean(jobId && statusKey === "READY");
 
   return (
@@ -578,9 +747,11 @@ export default function ProcessPage() {
 
           <div className="grid grid-cols-1 gap-4">
             <div className="space-y-2">
-              <label className="text-xs font-medium text-gray-700">Directory Path</label>
+              <label className="text-xs font-medium text-gray-700">
+                Directory Path (enter exact folder or root/place to scan for year/month/media structure)
+              </label>
               <Input
-                placeholder="e.g. C:\\Users\\you\\Pictures\\album"
+                placeholder="e.g. C:\\root\\place or C:\\Users\\you\\Pictures\\album"
                 value={dirPath}
                 onChange={(e) => setDirPath(e.target.value)}
                 className="h-11 bg-white border-purple-200 focus:border-purple-500 focus:ring-purple-500"
@@ -590,7 +761,7 @@ export default function ProcessPage() {
             <div className="flex flex-wrap gap-3">
               <Button
                 onClick={prepare}
-                disabled={isPreparing}
+                disabled={isPreparing || isScanning}
                 className="h-11 bg-purple-600 hover:bg-purple-700 text-white gap-2"
               >
                 {isPreparing ? (
@@ -599,7 +770,24 @@ export default function ProcessPage() {
                   </>
                 ) : (
                   <>
-                    <FolderSearch className="w-4 h-4" /> Prepare
+                    <FolderSearch className="w-4 h-4" /> Prepare Single
+                  </>
+                )}
+              </Button>
+
+              <Button
+                onClick={scanFolders}
+                disabled={isPreparing || isScanning}
+                variant="outline"
+                className="h-11 border-purple-200 text-purple-700 hover:bg-purple-50 gap-2"
+              >
+                {isScanning ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" /> Scanning...
+                  </>
+                ) : (
+                  <>
+                    <FolderSearch className="w-4 h-4" /> Scan & Select
                   </>
                 )}
               </Button>
@@ -765,50 +953,46 @@ export default function ProcessPage() {
                 <h3 className="text-sm font-semibold text-gray-900">Processing History</h3>
               </div>
               <div className="flex items-center gap-2">
-                <div className="hidden md:flex items-center gap-1">
-                  <Button
-                    variant={historyFilter === "ALL" ? "default" : "outline"}
-                    size="sm"
-                    onClick={() => setHistoryFilter("ALL")}
-                  >
-                    All
-                  </Button>
-                  <Button
-                    variant={historyFilter === "READY" ? "default" : "outline"}
-                    size="sm"
-                    onClick={() => setHistoryFilter("READY")}
-                  >
-                    Ready
-                  </Button>
-                  <Button
-                    variant={historyFilter === "COMPLETED" ? "default" : "outline"}
-                    size="sm"
-                    onClick={() => setHistoryFilter("COMPLETED")}
-                  >
-                    Completed
-                  </Button>
-                  <Button
-                    variant={historyFilter === "PREPARING" ? "default" : "outline"}
-                    size="sm"
-                    onClick={() => setHistoryFilter("PREPARING")}
-                  >
-                    Preparing
-                  </Button>
-                  <Button
-                    variant={historyFilter === "RUNNING" ? "default" : "outline"}
-                    size="sm"
-                    onClick={() => setHistoryFilter("RUNNING")}
-                  >
-                    Running
-                  </Button>
-                  <Button
-                    variant={historyFilter === "FAILED" ? "default" : "outline"}
-                    size="sm"
-                    onClick={() => setHistoryFilter("FAILED")}
-                  >
-                    Failed
-                  </Button>
-                </div>
+                {/* Status Filter Dropdown */}
+                <select
+                  value={historyFilter}
+                  onChange={(e) => setHistoryFilter(e.target.value as HistoryFilter)}
+                  className="h-9 px-3 rounded-md border border-gray-300 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                >
+                  <option value="ALL">All Status</option>
+                  <option value="READY">Ready</option>
+                  <option value="COMPLETED">Completed</option>
+                  <option value="PREPARING">Preparing</option>
+                  <option value="RUNNING">Running</option>
+                  <option value="FAILED">Failed</option>
+                  <option value="CANCELLED">Cancelled</option>
+                </select>
+
+                {/* Bulk Actions */}
+                <Button
+                  variant="default"
+                  size="sm"
+                  className="gap-2 bg-green-600 hover:bg-green-700"
+                  onClick={createAllReadyBatches}
+                  disabled={readyJobs.length <= 1 || isSubmitting}
+                  title={readyJobs.length <= 1 ? "Need at least 2 ready jobs" : `Create ${readyJobs.length} batches`}
+                >
+                  <Send className="w-4 h-4" />
+                  Create All ({readyJobs.length})
+                </Button>
+
+                <Button
+                  variant="default"
+                  size="sm"
+                  className="gap-2 bg-blue-600 hover:bg-blue-700"
+                  onClick={ingestAllCompleted}
+                  disabled={completedJobsNeedingIngest.length <= 1 || ingestingJobs.size > 0}
+                  title={completedJobsNeedingIngest.length <= 1 ? "Need at least 2 completed jobs" : `Ingest ${completedJobsNeedingIngest.length} batches`}
+                >
+                  <RotateCw className="w-4 h-4" />
+                  Ingest All ({completedJobsNeedingIngest.length})
+                </Button>
+
                 <Button
                   variant="outline"
                   size="sm"
@@ -954,6 +1138,25 @@ export default function ProcessPage() {
                                 )}
                               </Button>
                             )}
+                            {h.status === "FAILED" && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => retryFailedBatch(h.jobId)}
+                                disabled={isSubmitting}
+                                className="gap-2 border-red-200 text-red-600 hover:bg-red-50"
+                              >
+                                {isSubmitting ? (
+                                  <>
+                                    <Loader2 className="w-3 h-3 animate-spin" /> Retrying...
+                                  </>
+                                ) : (
+                                  <>
+                                    <RotateCw className="w-3 h-3" /> Retry Batch
+                                  </>
+                                )}
+                              </Button>
+                            )}
                           </div>
                         </TableCell>
                         <TableCell className="text-center py-4 px-6">
@@ -983,6 +1186,93 @@ export default function ProcessPage() {
           </div>
         </div>
       </div>
+
+      {/* Scan & Select Modal */}
+      <Dialog open={showScanModal} onOpenChange={setShowScanModal}>
+        <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-bold text-gray-900">
+              Select Media Folders to Prepare
+            </DialogTitle>
+            <DialogDescription className="text-gray-600">
+              Found {scannedFolders.length} media folder(s). Select which ones to prepare for batch processing.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-2 py-4 max-h-96 overflow-y-auto">
+            {scannedFolders.map((folder) => (
+              <div
+                key={folder.fullPath}
+                className="flex items-center gap-3 p-3 border border-gray-200 rounded-lg hover:bg-gray-50 transition"
+              >
+                <input
+                  type="checkbox"
+                  checked={selectedFolders.has(folder.fullPath)}
+                  onChange={(e) => {
+                    setSelectedFolders((prev) => {
+                      const next = new Set(prev);
+                      if (e.target.checked) {
+                        next.add(folder.fullPath);
+                      } else {
+                        next.delete(folder.fullPath);
+                      }
+                      return next;
+                    });
+                  }}
+                  className="h-4 w-4 rounded border-gray-300 text-purple-600 focus:ring-purple-500"
+                />
+                <div className="flex-1">
+                  <div className="text-sm font-medium text-gray-900">{folder.relativePath}</div>
+                  <div className="text-xs text-gray-500">{folder.fullPath}</div>
+                </div>
+                <div className="text-xs font-semibold text-purple-700 bg-purple-50 px-2 py-1 rounded">
+                  {folder.imageCount} images
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <DialogFooter className="flex gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setShowScanModal(false)}
+              className="font-medium"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={prepareAll}
+              disabled={isPreparing}
+              className="bg-purple-600 hover:bg-purple-700 font-medium gap-2"
+            >
+              {isPreparing ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" /> Preparing...
+                </>
+              ) : (
+                <>
+                  Prepare All ({scannedFolders.length})
+                </>
+              )}
+            </Button>
+            <Button
+              onClick={prepareSelected}
+              disabled={isPreparing || selectedFolders.size === 0}
+              className="bg-blue-600 hover:bg-blue-700 font-medium gap-2"
+            >
+              {isPreparing ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" /> Preparing...
+                </>
+              ) : (
+                <>
+                  Prepare Selected ({selectedFolders.size})
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
