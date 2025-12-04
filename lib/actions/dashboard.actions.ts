@@ -2,9 +2,6 @@
 
 import prisma from "../prisma";
 
-/**
- * Get admin dashboard stats
- */
 export async function getAdminDashboardStats() {
   try {
     // Total users
@@ -12,26 +9,13 @@ export async function getAdminDashboardStats() {
       where: { role: "USER" },
     });
 
-    // Currently online users (no logoutAt)
-    const now = new Date();
-    const startOfDay = new Date(
-      now.getFullYear(),
-      now.getMonth(),
-      now.getDate()
-    );
-    const endOfDay = new Date(startOfDay);
-    endOfDay.setDate(startOfDay.getDate() + 1);
-
-    const onlineActivities = await prisma.userActivity.findMany({
+    // Currently online users (based on isCheckedIn flag)
+    const currentlyOnline = await prisma.user.count({
       where: {
-        loginAt: { lt: endOfDay },
-        logoutAt: null,
+        role: "USER",
+        isCheckedIn: true,
       },
-      select: { userId: true },
-      distinct: ["userId"],
     });
-
-    const currentlyOnline = onlineActivities.length;
 
     // Total batches processed
     const totalBatches = await prisma.imageJob.count();
@@ -125,9 +109,6 @@ export async function getAdminDashboardStats() {
   }
 }
 
-/**
- * Get user dashboard stats
- */
 export async function getUserDashboardStats(userId: string) {
   try {
     if (!userId) {
@@ -174,23 +155,22 @@ export async function getUserDashboardStats(userId: string) {
     const todayActivities = await prisma.userActivity.findMany({
       where: {
         userId,
-        loginAt: { lt: endOfDay },
+        checkInAt: { lt: endOfDay },
         OR: [
-          { logoutAt: null },
-          { logoutAt: { gt: startOfDay } },
-          { logoutAt: { isSet: false } },
+          { checkOutAt: null },
+          { checkOutAt: { gt: startOfDay } },
         ],
       },
       select: {
-        loginAt: true,
-        logoutAt: true,
+        checkInAt: true,
+        checkOutAt: true,
       },
     });
 
     let todayMinutes = 0;
     for (const act of todayActivities) {
-      const start = act.loginAt < startOfDay ? startOfDay : act.loginAt;
-      const rawEnd = act.logoutAt ?? now;
+      const start = act.checkInAt < startOfDay ? startOfDay : act.checkInAt;
+      const rawEnd = act.checkOutAt ?? now;
       const end = rawEnd > endOfDay ? endOfDay : rawEnd;
       const diff = Math.max(0, end.getTime() - start.getTime());
       todayMinutes += Math.floor(diff / 60000);

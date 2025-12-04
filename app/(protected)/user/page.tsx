@@ -4,9 +4,9 @@ import { nextauthOptions } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { getUserDashboardStats } from "@/lib/actions/dashboard.actions";
 import Link from "next/link";
+import CheckInOutControls from "./_components/CheckInOutControls";
 import {
   Calendar,
-  Clock,
   Image as ImageIcon,
   FolderKanban,
   CheckCircle2,
@@ -93,26 +93,8 @@ async function UserPage() {
           <div className="mt-4 text-sm text-slate-500">Days worked</div>
         </div>
 
-        {/* Today's Work Duration */}
-        <div className="bg-white rounded-xl shadow-md p-6 border-l-4 border-green-500">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium text-slate-600 mb-1">
-                Today&apos;s Work
-              </p>
-              <p className="text-3xl font-bold text-slate-800">
-                {Math.floor(stats.todayMinutes / 60)}h{" "}
-                {stats.todayMinutes % 60}m
-              </p>
-            </div>
-            <div className="bg-green-100 p-3 rounded-lg">
-              <Clock className="w-8 h-8 text-green-600" />
-            </div>
-          </div>
-          <div className="mt-4 text-sm text-green-600 font-medium">
-            {stats.todayFormatted}
-          </div>
-        </div>
+        {/* Check-in/Check-out Controls */}
+        <CheckInOutControls userId={session.user.id} />
 
         {/* Total Processed Images */}
         <div className="bg-white rounded-xl shadow-md p-6 border-l-4 border-purple-500">

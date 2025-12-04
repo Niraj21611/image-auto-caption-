@@ -67,57 +67,53 @@ export const nextauthOptions: NextAuthOptions = {
   },
   events: {
     async signIn({ user }) {
-      try {
-        const now = new Date();
-        const startOfDay = new Date(
-          now.getFullYear(),
-          now.getMonth(),
-          now.getDate()
-        );
-
-        const day = now.getDay();
-        const diffToMonday = day === 0 ? -6 : 1 - day;
-        const monday = new Date(now);
-        monday.setDate(now.getDate() + diffToMonday);
-        monday.setHours(0, 0, 0, 0);
-
-        await prisma.userActivity.create({
-          data: {
-            userId: (user as User).id,
-            loginAt: now,
-            date: startOfDay,
-            weekStart: monday,
-          },
-        });
-      } catch (err) {
-        console.error("Failed to record login activity", err);
-      }
+      // Login activity is now tracked via manual check-in/check-out
+      // No automatic activity recording on sign-in
+      console.log(`User ${user.email} signed in`);
     },
     async signOut({ token }) {
+      // Logout activity is now tracked via manual check-in/check-out
+      // Auto check-out user if they are checked in
       try {
         const userId = (token as JWT)?.sub || (token as { id?: string })?.id;
         if (!userId) return;
-        const latestActivity = await prisma.userActivity.findFirst({
-          where: {
-            userId,
-            OR: [{ logoutAt: null }, { logoutAt: { isSet: false } }],
-          },
-          orderBy: [{ loginAt: "desc" }, { createdAt: "desc" }],
-        });
-        if (latestActivity) {
-          const logoutAt = new Date();
-          const duration = Math.floor(
-            (logoutAt.getTime() - new Date(latestActivity.loginAt).getTime()) /
-              60000
-          );
 
-          await prisma.userActivity.update({
-            where: { id: latestActivity.id },
-            data: { logoutAt, duration },
+        const user = await prisma.user.findUnique({
+          where: { id: userId },
+          select: { isCheckedIn: true },
+        });
+
+        if (user?.isCheckedIn) {
+          // Auto checkout on logout
+          const activity = await prisma.userActivity.findFirst({
+            where: {
+              userId,
+              checkOutAt: null,
+            },
+            orderBy: { checkInAt: "desc" },
           });
+
+          if (activity) {
+            const now = new Date();
+            const diff = now.getTime() - activity.checkInAt.getTime();
+            const minutes = Math.min(Math.floor(diff / 60000), 12 * 60);
+
+            await prisma.userActivity.update({
+              where: { id: activity.id },
+              data: {
+                checkOutAt: now,
+                duration: minutes,
+              },
+            });
+
+            await prisma.user.update({
+              where: { id: userId },
+              data: { isCheckedIn: false },
+            });
+          }
         }
       } catch (err) {
-        console.error("Failed to record logout activity", err);
+        console.error("Failed to auto checkout on signout", err);
       }
     },
   },

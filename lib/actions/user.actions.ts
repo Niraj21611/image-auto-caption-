@@ -128,6 +128,215 @@ function formatDuration(totalMinutes: number): string {
   return `${hrs} hr${hrs > 1 ? "s" : ""} ${mins} mins`;
 }
 
+// Check-in: Start tracking user activity
+export async function checkIn(userId: string) {
+  try {
+    const now = new Date();
+    const startOfDay = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate()
+    );
+
+    console.log("[Server checkIn] Starting check-in for user:", userId);
+
+    // Check if user is already checked in
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { isCheckedIn: true },
+    });
+
+    console.log("[Server checkIn] Current isCheckedIn:", user?.isCheckedIn);
+
+    if (user?.isCheckedIn) {
+      return { success: false, error: "Already checked in" };
+    }
+
+    // Check for any unclosed activity (safety check)
+    const unclosedActivity = await prisma.userActivity.findFirst({
+      where: {
+        userId,
+        checkOutAt: null,
+      },
+      orderBy: { checkInAt: "desc" },
+    });
+
+    console.log("[Server checkIn] Unclosed activity:", unclosedActivity ? `ID: ${unclosedActivity.id}` : "NONE");
+
+    // If there's an unclosed activity, close it first
+    if (unclosedActivity) {
+      const diff = now.getTime() - unclosedActivity.checkInAt.getTime();
+      const minutes = Math.min(Math.floor(diff / 60000), 12 * 60);
+      
+      console.log("[Server checkIn] Closing unclosed activity with duration:", minutes);
+      
+      await prisma.userActivity.update({
+        where: { id: unclosedActivity.id },
+        data: {
+          checkOutAt: now,
+          duration: minutes,
+        },
+      });
+    }
+
+    // Update user's isCheckedIn flag
+    await prisma.user.update({
+      where: { id: userId },
+      data: { isCheckedIn: true },
+    });
+
+    console.log("[Server checkIn] Updated user isCheckedIn to true");
+
+    // Create new activity record
+    const newActivity = await prisma.userActivity.create({
+      data: {
+        userId,
+        checkInAt: now,
+        date: startOfDay,
+      },
+    });
+
+    console.log("[Server checkIn] Created new activity:", newActivity.id);
+
+    return { success: true };
+  } catch (err) {
+    console.error("Error checking in:", err);
+    return { success: false, error: "Error checking in" };
+  }
+}
+
+// Check-out: Stop tracking and calculate duration
+export async function checkOut(userId: string) {
+  try {
+    const now = new Date();
+    console.log("[Server checkOut] Starting checkout for user:", userId);
+
+    // Check if user is actually checked in
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { isCheckedIn: true },
+    });
+
+    console.log("[Server checkOut] User isCheckedIn:", user?.isCheckedIn);
+
+    if (!user?.isCheckedIn) {
+      return { success: false, error: "You are not currently checked in" };
+    }
+
+    // Debug: Check all activities for this user
+    const allActivities = await prisma.userActivity.findMany({
+      where: { userId },
+      orderBy: { checkInAt: "desc" },
+      take: 5,
+    });
+    
+    console.log("[Server checkOut] All recent activities:", allActivities.map(a => ({
+      id: a.id,
+      checkInAt: a.checkInAt,
+      checkOutAt: a.checkOutAt,
+    })));
+
+    // Find the most recent unclosed activity - try without the null check first
+    const activity = allActivities.find(a => !a.checkOutAt);
+    
+    console.log("[Server checkOut] Found activity via find:", activity ? `ID: ${activity.id}` : "NONE");
+
+    if (!activity) {
+      // Inconsistent state - fix it
+      console.log("[Server checkOut] No activity found, resetting user status");
+      await prisma.user.update({
+        where: { id: userId },
+        data: { isCheckedIn: false },
+      });
+      return { success: false, error: "No active check-in session found. Your status has been reset." };
+    }
+
+    // Calculate duration in minutes (max 12 hours per session)
+    const diff = now.getTime() - activity.checkInAt.getTime();
+    const minutes = Math.min(Math.floor(diff / 60000), 12 * 60);
+
+    console.log("[Server checkOut] Duration:", minutes, "minutes");
+
+    // Update activity with check-out time and duration
+    await prisma.userActivity.update({
+      where: { id: activity.id },
+      data: {
+        checkOutAt: now,
+        duration: minutes,
+      },
+    });
+
+    // Update user's isCheckedIn flag
+    await prisma.user.update({
+      where: { id: userId },
+      data: { isCheckedIn: false },
+    });
+
+    return { success: true, data: { duration: minutes } };
+  } catch (err) {
+    console.error("Error checking out:", err);
+    return { success: false, error: "Error checking out" };
+  }
+}
+
+// Get current check-in status
+export async function getActiveCheckIn(userId: string) {
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { isCheckedIn: true },
+    });
+
+    if (!user) {
+      return { success: false, error: "User not found" };
+    }
+
+    if (!user.isCheckedIn) {
+      return { success: true, data: { isCheckedIn: false } };
+    }
+
+    // Find the active session
+    const activity = await prisma.userActivity.findFirst({
+      where: {
+        userId,
+        checkOutAt: null,
+      },
+      orderBy: { checkInAt: "desc" },
+    });
+
+    if (!activity) {
+      // Inconsistent state - fix it
+      await prisma.user.update({
+        where: { id: userId },
+        data: { isCheckedIn: false },
+      });
+      return { success: true, data: { isCheckedIn: false } };
+    }
+
+    // Auto checkout after 12 hours
+    const now = new Date();
+    const diff = now.getTime() - activity.checkInAt.getTime();
+    const hours = diff / (1000 * 60 * 60);
+
+    if (hours >= 12) {
+      await checkOut(userId);
+      return { success: true, data: { isCheckedIn: false } };
+    }
+
+    return {
+      success: true,
+      data: {
+        isCheckedIn: true,
+        checkInAt: activity.checkInAt,
+        elapsedMinutes: Math.floor(diff / 60000),
+      },
+    };
+  } catch (err) {
+    console.error("Error getting active check-in:", err);
+    return { success: false, error: "Error getting active check-in" };
+  }
+}
+
 export async function getUsersTodayDurations(userIds: string[]) {
   try {
     if (!userIds || userIds.length === 0)
@@ -135,7 +344,7 @@ export async function getUsersTodayDurations(userIds: string[]) {
         success: true,
         data: {} as Record<
           string,
-          { minutes: number; formatted: string; isOnline: boolean }
+          { minutes: number; milliseconds: number; formatted: string; isOnline: boolean }
         >,
       };
 
@@ -148,50 +357,62 @@ export async function getUsersTodayDurations(userIds: string[]) {
     const endOfDay = new Date(startOfDay);
     endOfDay.setDate(startOfDay.getDate() + 1);
 
+    // Get all users to check isCheckedIn status
+    const users = await prisma.user.findMany({
+      where: { id: { in: userIds } },
+      select: { id: true, isCheckedIn: true },
+    });
+
+    // Get all activities for today - fetch all and filter in JS instead of using checkOutAt: null
     const activities = await prisma.userActivity.findMany({
       where: {
         userId: { in: userIds },
-        loginAt: { lt: endOfDay },
-        OR: [
-          { logoutAt: null },
-          { logoutAt: { gt: startOfDay } },
-          { logoutAt: { isSet: false } },
-        ],
+        checkInAt: { gte: startOfDay, lt: endOfDay },
       },
       select: {
         userId: true,
-        loginAt: true,
-        logoutAt: true,
+        checkInAt: true,
+        checkOutAt: true,
       },
-      orderBy: { loginAt: "asc" },
+      orderBy: { checkInAt: "asc" },
     });
 
+    console.log(`[getUsersTodayDurations] Found ${activities.length} activities for ${userIds.length} users`);
+
     const totals = new Map<string, number>();
-    const onlineUsers = new Set<string>();
+    const totalsMs = new Map<string, number>();  // Track milliseconds for precision
+    const onlineUsersMap = new Map<string, boolean>();
+
+    // Set online status from user's isCheckedIn flag
+    for (const user of users) {
+      onlineUsersMap.set(user.id, user.isCheckedIn);
+    }
 
     for (const act of activities) {
-      const start = act.loginAt < startOfDay ? startOfDay : act.loginAt;
-      const rawEnd = act.logoutAt ?? now;
+      const start = act.checkInAt < startOfDay ? startOfDay : act.checkInAt;
+      const rawEnd = act.checkOutAt ?? now;
       const end = rawEnd > endOfDay ? endOfDay : rawEnd;
       const diff = Math.max(0, end.getTime() - start.getTime());
       const mins = Math.floor(diff / 60000);
+      
+      console.log(`[getUsersTodayDurations] Activity for ${act.userId}: ${mins} mins (checkOut: ${act.checkOutAt ? 'yes' : 'NO (active)'})`);
+      
       totals.set(act.userId, (totals.get(act.userId) || 0) + mins);
-
-      if (!act.logoutAt) {
-        onlineUsers.add(act.userId);
-      }
+      totalsMs.set(act.userId, (totalsMs.get(act.userId) || 0) + diff);  // Store precise ms
     }
 
     const result: Record<
       string,
-      { minutes: number; formatted: string; isOnline: boolean }
+      { minutes: number; milliseconds: number; formatted: string; isOnline: boolean }
     > = {};
     for (const id of userIds) {
       const mins = totals.get(id) || 0;
+      const ms = totalsMs.get(id) || 0;
       result[id] = {
         minutes: mins,
+        milliseconds: ms,  // Add milliseconds for precision
         formatted: formatDuration(mins),
-        isOnline: onlineUsers.has(id),
+        isOnline: onlineUsersMap.get(id) || false,
       };
     }
 
@@ -211,14 +432,14 @@ export async function getUserWeeklyActivity(
     const activities = await prisma.userActivity.findMany({
       where: {
         userId,
-        loginAt: { gte: startDate, lt: endDate },
+        checkInAt: { gte: startDate, lt: endDate },
       },
       select: {
-        loginAt: true,
-        logoutAt: true,
+        checkInAt: true,
+        checkOutAt: true,
         date: true,
       },
-      orderBy: { loginAt: "asc" },
+      orderBy: { checkInAt: "asc" },
     });
 
     const dailyTotals = new Map<string, number>();
@@ -231,19 +452,19 @@ export async function getUserWeeklyActivity(
     };
 
     for (const act of activities) {
-      // Compute boundaries using the local day of loginAt to avoid UTC shifting
-      const loginLocal = new Date(act.loginAt);
+      // Compute boundaries using the local day of checkInAt to avoid UTC shifting
+      const checkInLocal = new Date(act.checkInAt);
       const dayStart = new Date(
-        loginLocal.getFullYear(),
-        loginLocal.getMonth(),
-        loginLocal.getDate()
+        checkInLocal.getFullYear(),
+        checkInLocal.getMonth(),
+        checkInLocal.getDate()
       );
       const dayEnd = new Date(dayStart);
       dayEnd.setDate(dayEnd.getDate() + 1);
       const dateKey = fmtLocalKey(dayStart);
 
-      const start = act.loginAt < dayStart ? dayStart : act.loginAt;
-      const rawEnd = act.logoutAt ?? now;
+      const start = act.checkInAt < dayStart ? dayStart : act.checkInAt;
+      const rawEnd = act.checkOutAt ?? now;
       const end = rawEnd > dayEnd ? dayEnd : rawEnd;
       const diff = Math.max(0, end.getTime() - start.getTime());
       const mins = Math.floor(diff / 60000);
@@ -283,5 +504,45 @@ export async function getUserWeeklyActivity(
   } catch (err) {
     console.error("Error fetching weekly activity:", err);
     return { success: false, error: "Error fetching weekly activity" };
+  }
+}
+
+// Get user's sessions for a specific day
+export async function getUserDailySessions(
+  userId: string,
+  dayStart: Date,
+  dayEnd?: Date
+) {
+  try {
+    const endOfDay = dayEnd || new Date(dayStart);
+    if (!dayEnd) {
+      endOfDay.setDate(dayStart.getDate() + 1);
+    }
+
+    const activities = await prisma.userActivity.findMany({
+      where: {
+        userId,
+        checkInAt: { gte: dayStart, lt: endOfDay },
+      },
+      select: {
+        checkInAt: true,
+        checkOutAt: true,
+        duration: true,
+      },
+      orderBy: { checkInAt: "asc" },
+    });
+
+    return {
+      success: true,
+      data: activities.map((act) => ({
+        checkInAt: act.checkInAt,
+        checkOutAt: act.checkOutAt,
+        duration: act.duration,
+        isActive: !act.checkOutAt,
+      })),
+    };
+  } catch (err) {
+    console.error("Error fetching daily sessions:", err);
+    return { success: false, error: "Error fetching daily sessions" };
   }
 }
