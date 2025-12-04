@@ -26,16 +26,11 @@ export default function CheckInOutControls({
   // Fetch initial status and today's total
   useEffect(() => {
     const init = async () => {
-      console.log("[CheckInOut] Initializing for user:", userId);
       const todayResult = await getUsersTodayDurations([userId]);
-      console.log("[CheckInOut] Today's data:", todayResult);
       
       if (todayResult.success && todayResult.data) {
-        const totalMs = todayResult.data[userId]?.milliseconds || 0;  // Use milliseconds for precision
+        const totalMs = todayResult.data[userId]?.milliseconds || 0;
         const isOnline = todayResult.data[userId]?.isOnline || false;
-        
-        console.log("[CheckInOut] Total ms:", totalMs, "Total mins:", Math.floor(totalMs/60000));
-        console.log("[CheckInOut] Is online:", isOnline);
         
         setBaseMs(totalMs);
         setDisplayMs(totalMs);
@@ -45,28 +40,34 @@ export default function CheckInOutControls({
     };
 
     init();
+
+    // Listen for check-in/out events from other components
+    const handleCheckInEvent = (e: Event) => {
+      const customEvent = e as CustomEvent;
+      const { isCheckedIn: newState, totalMs } = customEvent.detail;
+      setIsCheckedIn(newState);
+      setBaseMs(totalMs);
+      setDisplayMs(totalMs);
+      lastSyncRef.current = Date.now();
+    };
+
+    window.addEventListener("checkin-state-changed", handleCheckInEvent);
+    return () => {
+      window.removeEventListener("checkin-state-changed", handleCheckInEvent);
+    };
   }, [userId]);
 
   // Timer effect - only runs when checked in
   useEffect(() => {
-    if (!isCheckedIn) {
-      console.log("[CheckInOut] Timer stopped - not checked in");
-      return;
-    }
-
-    console.log("[CheckInOut] Timer starting - baseMs:", baseMs, "lastSyncRef:", lastSyncRef.current);
+    if (!isCheckedIn) return;
 
     const interval = setInterval(() => {
       const drift = Date.now() - lastSyncRef.current;
       const newDisplayMs = baseMs + drift;
-      console.log("[CheckInOut] Timer tick - drift:", drift, "newDisplayMs:", newDisplayMs);
       setDisplayMs(newDisplayMs);
     }, 1000);
 
-    return () => {
-      console.log("[CheckInOut] Timer cleanup");
-      clearInterval(interval);
-    };
+    return () => clearInterval(interval);
   }, [isCheckedIn, baseMs]);
 
   // Sync with server every 30 seconds when checked in
@@ -76,7 +77,7 @@ export default function CheckInOutControls({
     const syncInterval = setInterval(async () => {
       const todayResult = await getUsersTodayDurations([userId]);
       if (todayResult.success && todayResult.data) {
-        const totalMs = todayResult.data[userId]?.milliseconds || 0;  // Use milliseconds
+        const totalMs = todayResult.data[userId]?.milliseconds || 0;
         setBaseMs(totalMs);
         lastSyncRef.current = Date.now();
       }
@@ -87,24 +88,27 @@ export default function CheckInOutControls({
 
   const handleCheckIn = async () => {
     setIsLoading(true);
-    console.log("[CheckInOut] Checking in...");
     const result = await checkIn(userId);
-    console.log("[CheckInOut] Check-in result:", result);
 
     if (result.success) {
       toast.success("Checked in successfully");
       
       // Refresh totals and set checked-in state
       const todayResult = await getUsersTodayDurations([userId]);
-      console.log("[CheckInOut] After check-in, today's data:", todayResult);
       
       if (todayResult.success && todayResult.data) {
-        const totalMs = todayResult.data[userId]?.milliseconds || 0;  // Use milliseconds for precision
-        console.log("[CheckInOut] Setting baseMs to:", totalMs, "isCheckedIn: true");
+        const totalMs = todayResult.data[userId]?.milliseconds || 0;
         setBaseMs(totalMs);
         setDisplayMs(totalMs);
         setIsCheckedIn(true);
         lastSyncRef.current = Date.now();
+
+        // Emit event to sync with other components
+        window.dispatchEvent(
+          new CustomEvent("checkin-state-changed", {
+            detail: { isCheckedIn: true, totalMs },
+          })
+        );
       }
     } else {
       toast.error(result.error || "Failed to check in");
@@ -115,24 +119,27 @@ export default function CheckInOutControls({
 
   const handleCheckOut = async () => {
     setIsLoading(true);
-    console.log("[CheckInOut] Checking out...");
     const result = await checkOut(userId);
-    console.log("[CheckInOut] Check-out result:", result);
 
     if (result.success) {
       toast.success("Checked out successfully");
       
       // Refresh totals and set checked-out state
       const todayResult = await getUsersTodayDurations([userId]);
-      console.log("[CheckInOut] After check-out, today's data:", todayResult);
       
       if (todayResult.success && todayResult.data) {
-        const totalMs = todayResult.data[userId]?.milliseconds || 0;  // Use milliseconds for precision
-        console.log("[CheckInOut] Setting baseMs to:", totalMs, "isCheckedIn: false");
+        const totalMs = todayResult.data[userId]?.milliseconds || 0;
         setBaseMs(totalMs);
         setDisplayMs(totalMs);
         setIsCheckedIn(false);
         lastSyncRef.current = Date.now();
+
+        // Emit event to sync with other components
+        window.dispatchEvent(
+          new CustomEvent("checkin-state-changed", {
+            detail: { isCheckedIn: false, totalMs },
+          })
+        );
       }
     } else {
       toast.error(result.error || "Failed to check out");

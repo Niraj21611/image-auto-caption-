@@ -132,7 +132,7 @@ function formatDuration(totalMinutes: number): string {
 async function autoCheckoutIfStale(userId: string) {
   try {
     const now = new Date();
-    const nineHoursAgo = new Date(now.getTime() - 9 * 60 * 60 * 1000); // 9 hours in milliseconds
+    const nineHoursAgo = new Date(now.getTime() - 9 * 60 * 60 * 1000);
 
     // Find all unclosed activities older than 9 hours
     const staleActivities = await prisma.userActivity.findMany({
@@ -148,7 +148,7 @@ async function autoCheckoutIfStale(userId: string) {
     // Auto-checkout each stale activity
     for (const activity of staleActivities) {
       const diff = now.getTime() - activity.checkInAt.getTime();
-      const minutes = Math.min(Math.floor(diff / 60000), 9 * 60); // Cap at 9 hours
+      const minutes = Math.min(Math.floor(diff / 60000), 9 * 60);
 
       await prisma.userActivity.update({
         where: { id: activity.id },
@@ -157,8 +157,6 @@ async function autoCheckoutIfStale(userId: string) {
           duration: minutes,
         },
       });
-
-      console.log(`[Auto-checkout] Checked out stale activity ${activity.id} for user ${userId}`);
     }
 
     // If any stale activities were found, update user's isCheckedIn status
@@ -167,7 +165,6 @@ async function autoCheckoutIfStale(userId: string) {
         where: { id: userId },
         data: { isCheckedIn: false },
       });
-      console.log(`[Auto-checkout] Updated user ${userId} isCheckedIn to false`);
     }
 
     return staleActivities.length;
@@ -187,8 +184,6 @@ export async function checkIn(userId: string) {
       now.getDate()
     );
 
-    console.log("[Server checkIn] Starting check-in for user:", userId);
-
     // First, check for any stale check-ins (over 9 hours) and auto-checkout
     await autoCheckoutIfStale(userId);
 
@@ -197,8 +192,6 @@ export async function checkIn(userId: string) {
       where: { id: userId },
       select: { isCheckedIn: true },
     });
-
-    console.log("[Server checkIn] Current isCheckedIn:", user?.isCheckedIn);
 
     if (user?.isCheckedIn) {
       return { success: false, error: "Already checked in" };
@@ -213,14 +206,10 @@ export async function checkIn(userId: string) {
       orderBy: { checkInAt: "desc" },
     });
 
-    console.log("[Server checkIn] Unclosed activity:", unclosedActivity ? `ID: ${unclosedActivity.id}` : "NONE");
-
     // If there's an unclosed activity, close it first
     if (unclosedActivity) {
       const diff = now.getTime() - unclosedActivity.checkInAt.getTime();
       const minutes = Math.min(Math.floor(diff / 60000), 9 * 60); // Cap at 9 hours
-      
-      console.log("[Server checkIn] Closing unclosed activity with duration:", minutes);
       
       await prisma.userActivity.update({
         where: { id: unclosedActivity.id },
@@ -237,18 +226,14 @@ export async function checkIn(userId: string) {
       data: { isCheckedIn: true },
     });
 
-    console.log("[Server checkIn] Updated user isCheckedIn to true");
-
     // Create new activity record
-    const newActivity = await prisma.userActivity.create({
+    await prisma.userActivity.create({
       data: {
         userId,
         checkInAt: now,
         date: startOfDay,
       },
     });
-
-    console.log("[Server checkIn] Created new activity:", newActivity.id);
 
     return { success: true };
   } catch (err) {
@@ -261,7 +246,6 @@ export async function checkIn(userId: string) {
 export async function checkOut(userId: string) {
   try {
     const now = new Date();
-    console.log("[Server checkOut] Starting checkout for user:", userId);
 
     // Check if user is actually checked in
     const user = await prisma.user.findUnique({
@@ -269,33 +253,22 @@ export async function checkOut(userId: string) {
       select: { isCheckedIn: true },
     });
 
-    console.log("[Server checkOut] User isCheckedIn:", user?.isCheckedIn);
-
     if (!user?.isCheckedIn) {
       return { success: false, error: "You are not currently checked in" };
     }
 
-    // Debug: Check all activities for this user
+    // Get all recent activities for this user
     const allActivities = await prisma.userActivity.findMany({
       where: { userId },
       orderBy: { checkInAt: "desc" },
       take: 5,
     });
-    
-    console.log("[Server checkOut] All recent activities:", allActivities.map(a => ({
-      id: a.id,
-      checkInAt: a.checkInAt,
-      checkOutAt: a.checkOutAt,
-    })));
 
-    // Find the most recent unclosed activity - try without the null check first
+    // Find the most recent unclosed activity
     const activity = allActivities.find(a => !a.checkOutAt);
-    
-    console.log("[Server checkOut] Found activity via find:", activity ? `ID: ${activity.id}` : "NONE");
 
     if (!activity) {
       // Inconsistent state - fix it
-      console.log("[Server checkOut] No activity found, resetting user status");
       await prisma.user.update({
         where: { id: userId },
         data: { isCheckedIn: false },
@@ -303,11 +276,9 @@ export async function checkOut(userId: string) {
       return { success: false, error: "No active check-in session found. Your status has been reset." };
     }
 
-    // Calculate duration in minutes (max 12 hours per session)
+    // Calculate duration in minutes (max 9 hours per session)
     const diff = now.getTime() - activity.checkInAt.getTime();
-    const minutes = Math.min(Math.floor(diff / 60000), 12 * 60);
-
-    console.log("[Server checkOut] Duration:", minutes, "minutes");
+    const minutes = Math.min(Math.floor(diff / 60000), 9 * 60);
 
     // Update activity with check-out time and duration
     await prisma.userActivity.update({
@@ -434,10 +405,8 @@ export async function getUsersTodayDurations(userIds: string[]) {
       orderBy: { checkInAt: "asc" },
     });
 
-    console.log(`[getUsersTodayDurations] Found ${activities.length} activities for ${userIds.length} users`);
-
     const totals = new Map<string, number>();
-    const totalsMs = new Map<string, number>();  // Track milliseconds for precision
+    const totalsMs = new Map<string, number>();
     const onlineUsersMap = new Map<string, boolean>();
 
     // Set online status from user's isCheckedIn flag
@@ -452,10 +421,8 @@ export async function getUsersTodayDurations(userIds: string[]) {
       const diff = Math.max(0, end.getTime() - start.getTime());
       const mins = Math.floor(diff / 60000);
       
-      console.log(`[getUsersTodayDurations] Activity for ${act.userId}: ${mins} mins (checkOut: ${act.checkOutAt ? 'yes' : 'NO (active)'})`);
-      
       totals.set(act.userId, (totals.get(act.userId) || 0) + mins);
-      totalsMs.set(act.userId, (totalsMs.get(act.userId) || 0) + diff);  // Store precise ms
+      totalsMs.set(act.userId, (totalsMs.get(act.userId) || 0) + diff);
     }
 
     const result: Record<
@@ -467,7 +434,7 @@ export async function getUsersTodayDurations(userIds: string[]) {
       const ms = totalsMs.get(id) || 0;
       result[id] = {
         minutes: mins,
-        milliseconds: ms,  // Add milliseconds for precision
+        milliseconds: ms,
         formatted: formatDuration(mins),
         isOnline: onlineUsersMap.get(id) || false,
       };

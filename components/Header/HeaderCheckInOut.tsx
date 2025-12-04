@@ -46,6 +46,21 @@ export default function HeaderCheckInOut({ userId }: HeaderCheckInOutProps) {
       }
     };
     init();
+
+    // Listen for check-in/out events from other components
+    const handleCheckInEvent = (e: Event) => {
+      const customEvent = e as CustomEvent;
+      const { isCheckedIn: newState, totalMs } = customEvent.detail;
+      setIsCheckedIn(newState);
+      setBaseMs(totalMs);
+      setDisplayMs(totalMs);
+      lastSyncRef.current = Date.now();
+    };
+
+    window.addEventListener("checkin-state-changed", handleCheckInEvent);
+    return () => {
+      window.removeEventListener("checkin-state-changed", handleCheckInEvent);
+    };
   }, [userId]);
 
   // Timer effect - runs every second when checked in
@@ -92,6 +107,13 @@ export default function HeaderCheckInOut({ userId }: HeaderCheckInOutProps) {
         setDisplayMs(totalMs);
         setIsCheckedIn(true);
         lastSyncRef.current = Date.now();
+
+        // Emit event to sync with other components
+        window.dispatchEvent(
+          new CustomEvent("checkin-state-changed", {
+            detail: { isCheckedIn: true, totalMs },
+          })
+        );
       }
     } else {
       toast.error(result.error || "Failed to check in");
@@ -116,6 +138,13 @@ export default function HeaderCheckInOut({ userId }: HeaderCheckInOutProps) {
         setDisplayMs(totalMs);
         setIsCheckedIn(false);
         lastSyncRef.current = Date.now();
+
+        // Emit event to sync with other components
+        window.dispatchEvent(
+          new CustomEvent("checkin-state-changed", {
+            detail: { isCheckedIn: false, totalMs },
+          })
+        );
       }
     } else {
       toast.error(result.error || "Failed to check out");
