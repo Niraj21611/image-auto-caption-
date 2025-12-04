@@ -30,6 +30,7 @@ type OverviewDataType = {
   approved: number;
   reviewed: number;
   captioned: number;
+  skipped: number;
   left: number;
 };
 
@@ -58,7 +59,7 @@ export default function AdminUserAssignPage() {
   const [totalCount, setTotalCount] = useState(0);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(70);
-  const [statusFilter, setStatusFilter] = useState<"CAPTIONED" | "REVIEWED" | "APPROVED" | null>(null);
+  const [statusFilter, setStatusFilter] = useState<"CAPTIONED" | "REVIEWED" | "APPROVED" | "SKIPPED" | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkApproving, setBulkApproving] = useState(false);
   const [approvingAll, setApprovingAll] = useState(false);
@@ -402,6 +403,11 @@ export default function AdminUserAssignPage() {
               icon={<CheckCircle2 className="w-5 h-5 text-emerald-600" />}
             />
             <OverviewCard
+              label="Skipped"
+              value={overview.skipped}
+              icon={<XCircle className="w-5 h-5 text-amber-600" />}
+            />
+            <OverviewCard
               label="Left to Approve"
               value={overview.left}
               icon={<Images className="w-5 h-5 text-amber-600" />}
@@ -446,6 +452,14 @@ export default function AdminUserAssignPage() {
                   className={statusFilter === "APPROVED" ? "bg-blue-600 hover:bg-blue-700" : ""}
                 >
                   Approved
+                </Button>
+                <Button
+                  variant={statusFilter === "SKIPPED" ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setStatusFilter("SKIPPED")}
+                  className={statusFilter === "SKIPPED" ? "bg-blue-600 hover:bg-blue-700" : ""}
+                >
+                  Skipped
                 </Button>
               </div>
             </div>
@@ -558,6 +572,8 @@ export default function AdminUserAssignPage() {
                       <Badge text="Approved" color="blue" />
                     ) : c.status === "REVIEWED" ? (
                       <Badge text="Reviewed" color="emerald" />
+                    ) : c.status === "SKIPPED" ? (
+                      <Badge text="Skipped" color="amber" />
                     ) : (
                       <Badge text="Captioned" color="gray" />
                     )}

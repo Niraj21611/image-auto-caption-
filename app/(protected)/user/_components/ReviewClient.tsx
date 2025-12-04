@@ -138,6 +138,9 @@ export default function ReviewClient({
       if (!res.success) {
         toast.error(res.error || "Failed to skip image");
       }
+      if (res.success) {
+        toast.success("Image marked as skipped");
+      }
 
       // Move to next image or next page
       if (selectedIndex < captions.length - 1) {
@@ -261,6 +264,11 @@ export default function ReviewClient({
                         <CheckCircle2 className="w-3 h-3" /> Reviewed
                       </span>
                     )}
+                    {caption.status === "SKIPPED" && (
+                      <span className="absolute top-2 right-2 inline-flex items-center gap-1 rounded-md bg-amber-600 text-white px-2 py-0.5 text-[10px] font-medium shadow-sm">
+                        Skipped
+                      </span>
+                    )}
                   </div>
                   <div className="p-2 bg-white">
                     <p className="text-xs text-neutral-600 truncate">
@@ -292,6 +300,11 @@ export default function ReviewClient({
                 {currentCaption.status === "REVIEWED" && (
                   <div className="absolute top-4 left-4 inline-flex items-center gap-2 rounded-full bg-green-600/90 text-white px-3 py-1 text-xs font-medium shadow">
                     <CheckCircle2 className="w-4 h-4" /> Reviewed
+                  </div>
+                )}
+                {currentCaption.status === "SKIPPED" && (
+                  <div className="absolute top-4 left-4 inline-flex items-center gap-2 rounded-full bg-amber-600/90 text-white px-3 py-1 text-xs font-medium shadow">
+                    Skipped
                   </div>
                 )}
               </div>
@@ -339,9 +352,20 @@ export default function ReviewClient({
                   <Button
                     variant="outline"
                     onClick={handleSkip}
-                    disabled={isSubmitting}
+                    disabled={
+                      isSubmitting ||
+                      currentCaption.status === "REVIEWED" ||
+                      currentCaption.status === "SKIPPED"
+                    }
                     className="w-1/3 border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700"
                     size="lg"
+                    title={
+                      currentCaption.status === "REVIEWED"
+                        ? "Already reviewed"
+                        : currentCaption.status === "SKIPPED"
+                        ? "Already skipped"
+                        : undefined
+                    }
                   >
                     Skip Image
                   </Button>

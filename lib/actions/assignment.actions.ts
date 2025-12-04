@@ -107,7 +107,7 @@ export async function getUserBatchOverview(jobId: string) {
 
     const whereBase: Prisma.ImageCaptionWhereInput = { jobId };
 
-    const [approved, reviewed, captioned] = await Promise.all([
+    const [approved, reviewed, captioned, skipped] = await Promise.all([
       prisma.imageCaption.count({
         where: { ...whereBase, status: "APPROVED" },
       }),
@@ -116,6 +116,9 @@ export async function getUserBatchOverview(jobId: string) {
       }),
       prisma.imageCaption.count({
         where: { ...whereBase, status: "CAPTIONED" },
+      }),
+      prisma.imageCaption.count({
+        where: { ...whereBase, status: "SKIPPED" },
       }),
     ]);
 
@@ -126,7 +129,7 @@ export async function getUserBatchOverview(jobId: string) {
 
     return {
       success: true,
-      data: { approved, reviewed, captioned, left, user: job.assignedUser },
+      data: { approved, reviewed, captioned, skipped, left, user: job.assignedUser },
     };
   } catch (err) {
     console.log("Error approving caption:", err);
@@ -170,7 +173,7 @@ export async function getProcessedCaptionsPage(
   jobId: string,
   page = 1,
   pageSize = 70,
-  statusFilter?: "CAPTIONED" | "REVIEWED" | "APPROVED" | null
+  statusFilter?: "CAPTIONED" | "REVIEWED" | "APPROVED" | "SKIPPED" | null
 ) {
   if (!jobId) return { success: false, error: "jobId is required" };
 
