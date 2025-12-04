@@ -42,6 +42,20 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  Pagination,
+  PaginationContent,
+  PaginationItem,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
+} from "@/components/ui/pagination";
 
 interface HistoryRow {
   jobId: string;
@@ -107,10 +121,12 @@ export default function ProcessPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [progress, setProgress] = useState<ProgressState | null>(null);
   const [history, setHistory] = useState<HistoryRow[]>([]);
-  type HistoryFilter = "ALL" | "READY" | "COMPLETED" | "PREPARING" | "FAILED" | "RUNNING";
+  type HistoryFilter = "ALL" | "READY" | "COMPLETED" | "PREPARING" | "FAILED" | "RUNNING" | "CANCELLED";
   const [historyFilter, setHistoryFilter] = useState<HistoryFilter>("ALL");
   const [ingestingJobs, setIngestingJobs] = useState<Set<string>>(new Set());
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const prepPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -269,6 +285,18 @@ export default function ProcessPage() {
     if (historyFilter === "ALL") return history;
     return history.filter((h) => normalizeStatus(h.status) === historyFilter);
   }, [history, historyFilter]);
+
+  const totalPages = Math.ceil(filteredHistory.length / itemsPerPage);
+  const paginatedHistory = useMemo(() => {
+    const startIndex = (currentPage - 1) * itemsPerPage;
+    const endIndex = startIndex + itemsPerPage;
+    return filteredHistory.slice(startIndex, endIndex);
+  }, [filteredHistory, currentPage, itemsPerPage]);
+
+  // Reset to page 1 when filter changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [historyFilter]);
 
   const readyJobs = useMemo(() => {
     return history.filter((h) => normalizeStatus(h.status) === "READY");
@@ -954,19 +982,39 @@ export default function ProcessPage() {
               </div>
               <div className="flex items-center gap-2">
                 {/* Status Filter Dropdown */}
-                <select
-                  value={historyFilter}
-                  onChange={(e) => setHistoryFilter(e.target.value as HistoryFilter)}
-                  className="h-9 px-3 rounded-md border border-gray-300 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                >
-                  <option value="ALL">All Status</option>
-                  <option value="READY">Ready</option>
-                  <option value="COMPLETED">Completed</option>
-                  <option value="PREPARING">Preparing</option>
-                  <option value="RUNNING">Running</option>
-                  <option value="FAILED">Failed</option>
-                  <option value="CANCELLED">Cancelled</option>
-                </select>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" size="sm" className="gap-2">
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4h13M3 8h9m-9 4h9m5-4v12m0 0l-4-4m4 4l4-4" />
+                      </svg>
+                      {historyFilter === "ALL" ? "All Status" : historyFilter}
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-48">
+                    <DropdownMenuItem onClick={() => setHistoryFilter("ALL")}>
+                      All Status
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => setHistoryFilter("READY")}>
+                      Ready
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => setHistoryFilter("COMPLETED")}>
+                      Completed
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => setHistoryFilter("PREPARING")}>
+                      Preparing
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => setHistoryFilter("RUNNING")}>
+                      Running
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => setHistoryFilter("FAILED")}>
+                      Failed
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => setHistoryFilter("CANCELLED")}>
+                      Cancelled
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
 
                 {/* Bulk Actions */}
                 <Button
@@ -1022,7 +1070,7 @@ export default function ProcessPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredHistory.length === 0 ? (
+                {paginatedHistory.length === 0 ? (
                   <TableRow className="hover:bg-transparent">
                     <TableCell colSpan={4} className="py-12 px-6">
                       <div className="flex flex-col items-center justify-center text-center">
@@ -1035,7 +1083,7 @@ export default function ProcessPage() {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  filteredHistory.map((h) => {
+                  paginatedHistory.map((h) => {
                     const processedDate = new Date(h.createdAt);
                     const now = new Date();
                     const diffMs = now.getTime() - processedDate.getTime();
@@ -1184,6 +1232,64 @@ export default function ProcessPage() {
               </TableBody>
             </Table>
           </div>
+
+          {/* Pagination */}
+          {totalPages > 1 && (
+            <div className="px-6 py-4 border-t border-gray-200">
+              <div className="flex items-center justify-between">
+                <div className="text-sm text-gray-600">
+                  Showing {(currentPage - 1) * itemsPerPage + 1} to {Math.min(currentPage * itemsPerPage, filteredHistory.length)} of {filteredHistory.length} {historyFilter !== "ALL" ? historyFilter.toLowerCase() : ""} batches
+                </div>
+                <Pagination>
+                  <PaginationContent>
+                    <PaginationItem>
+                      <PaginationPrevious
+                        onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
+                        className={currentPage === 1 ? "pointer-events-none opacity-50" : "cursor-pointer"}
+                      />
+                    </PaginationItem>
+                    {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => {
+                      // Show first page, last page, current page, and pages around current
+                      const showPage =
+                        page === 1 ||
+                        page === totalPages ||
+                        (page >= currentPage - 1 && page <= currentPage + 1);
+                      
+                      if (!showPage) {
+                        // Show ellipsis
+                        if (page === currentPage - 2 || page === currentPage + 2) {
+                          return (
+                            <PaginationItem key={page}>
+                              <span className="px-4 py-2">...</span>
+                            </PaginationItem>
+                          );
+                        }
+                        return null;
+                      }
+
+                      return (
+                        <PaginationItem key={page}>
+                          <PaginationLink
+                            onClick={() => setCurrentPage(page)}
+                            isActive={currentPage === page}
+                            className="cursor-pointer"
+                          >
+                            {page}
+                          </PaginationLink>
+                        </PaginationItem>
+                      );
+                    })}
+                    <PaginationItem>
+                      <PaginationNext
+                        onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
+                        className={currentPage === totalPages ? "pointer-events-none opacity-50" : "cursor-pointer"}
+                      />
+                    </PaginationItem>
+                  </PaginationContent>
+                </Pagination>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
