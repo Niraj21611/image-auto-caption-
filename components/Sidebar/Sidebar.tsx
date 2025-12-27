@@ -8,6 +8,8 @@ import {
   Workflow,
   ClipboardCheck,
   Verified,
+  Settings,
+  Download,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -47,12 +49,13 @@ export default function Sidebar() {
           { title: "Assign Batch", url: "/admin/assign", icon: UserPlus },
           { title: "Process Batch", url: "/admin/process", icon: Workflow },
           { title: "Track Batch", url: "/admin/track", icon: Verified },
-          // { title: "Settings", url: "/admin/setting", icon: Settings },
+          { title: "Export Images", url: "/admin/export", icon: Download },
+          { title: "Settings", url: "/admin/setting", icon: Settings },
         ]
       : [
           { title: "Dashboard", url: "/user", icon: Home },
           { title: "Review", url: "/user/review", icon: ClipboardCheck },
-          // { title: "Settings", url: "/user/setting", icon: Settings },
+          { title: "Settings", url: "/user/setting", icon: Settings },
         ];
 
   return (
