@@ -21,17 +21,18 @@ enum ImageStatus {
 }
 
 model User {
-    id           String         @id @default(auto()) @map("_id") @db.ObjectId
-    name         String
-    email        String         @unique
-    password     String
-    role         UserRole       @default(USER)
-    isCheckedIn  Boolean        @default(false)
-    createdAt    DateTime       @default(now())
-    updatedAt    DateTime       @updatedAt
-    UserActivity UserActivity[]
-    ImageCaption ImageCaption[]
-    ImageJob     ImageJob[]
+    id              String          @id @default(auto()) @map("_id") @db.ObjectId
+    name            String
+    email           String          @unique
+    password        String
+    role            UserRole        @default(USER)
+    isCheckedIn     Boolean         @default(false)
+    createdAt       DateTime        @default(now())
+    updatedAt       DateTime        @updatedAt
+    UserActivity    UserActivity[]
+    ImageCaption    ImageCaption[]
+    ImageJob        ImageJob[]
+    exportHistories ExportHistory[]
 }
 
 model UserActivity {
@@ -40,8 +41,8 @@ model UserActivity {
     userId     String    @db.ObjectId
     checkInAt  DateTime
     checkOutAt DateTime?
-    duration   Int?      // in minutes
-    date       DateTime  // start of day for this session
+    duration   Int? // in minutes
+    date       DateTime // start of day for this session
     createdAt  DateTime  @default(now())
     updatedAt  DateTime  @updatedAt
 }
@@ -62,7 +63,8 @@ model ImageJob {
     createdAt DateTime @default(now())
     updatedAt DateTime @updatedAt
 
-    ImageCaption ImageCaption[]
+    ImageCaption  ImageCaption[]
+    ExportHistory ExportHistory[]
 }
 
 model ImageCaption {
@@ -82,6 +84,23 @@ model ImageCaption {
     Job   ImageJob? @relation(fields: [jobId], references: [id])
 
     reviewedAt DateTime?
+    isExported Boolean   @default(false) 
+    exportedAt DateTime?
     createdAt  DateTime  @default(now())
     updatedAt  DateTime  @updatedAt
+}
+
+model ExportHistory {
+    id              String   @id @default(auto()) @map("_id") @db.ObjectId
+    jobId           String   @db.ObjectId
+    job             ImageJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+    destinationPath String
+    exportedCount   Int
+    exportedAt      DateTime @default(now())
+    exportedBy      String   @db.ObjectId
+    user            User     @relation(fields: [exportedBy], references: [id])
+    imageIds        String[] // Array of ImageCaption IDs that were exported
+
+    @@index([jobId])
+    @@index([exportedBy])
 }

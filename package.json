@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "backfill:export": "ts-node scripts/backfill-export-fields.ts"
   },
   "prisma": {
     "seed": "ts-node prisma/seed.ts"
