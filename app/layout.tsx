@@ -11,7 +11,7 @@ const dmSans = DM_Sans({
 });
 
 export const metadata: Metadata = {
-  title: "Sakal Auto Caption",
+  title: "CapFlow Auto Caption",
   description: "AI-powered auto captioning app",
 };
 

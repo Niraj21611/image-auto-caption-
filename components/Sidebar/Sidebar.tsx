@@ -73,7 +73,7 @@ export default function Sidebar() {
             <div className="w-8 h-8 rounded-lg bg-linear-to-br from-blue-600 to-blue-700 flex items-center justify-center shadow-md">
               <Home className="w-4 h-4 text-white" />
             </div>
-            <span className="font-bold text-lg text-neutral-800">Sakal</span>
+            <span className="font-bold text-lg text-neutral-800">CapFlow</span>
           </div>
         ) : (
           <div className="w-8 h-8 rounded-lg bg-linear-to-br from-blue-600 to-blue-700 flex items-center justify-center mx-auto shadow-md">

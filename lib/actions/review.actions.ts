@@ -35,6 +35,26 @@ async function filePathToDataUrl(filePath: string) {
 
 // (unused) previously used helper retained for reference
 
+async function ensureCaptionsLinkedToJob(jobId: string) {
+	if (!jobId) return 0;
+	const job = await prisma.imageJob.findUnique({
+		where: { id: jobId },
+		select: { id: true, dirPath: true },
+	});
+	if (!job?.dirPath) return 0;
+
+	// Attach any captions that belong to this job's directory but are missing/mismatched.
+	const result = await prisma.imageCaption.updateMany({
+		where: {
+			jobId: { not: job.id },
+			filePath: { startsWith: job.dirPath },
+		},
+		data: { jobId: job.id },
+	});
+
+	return result.count || 0;
+}
+
 
 export async function getUserAssignedJobs(userId: string) {
 	if (!userId) throw new Error("userId is required");
@@ -54,12 +74,24 @@ export async function getUserAssignedJobs(userId: string) {
 
 export async function getCaptionsPage(jobId: string, page = 0, pageSize = 10) {
 	if (!jobId) throw new Error("jobId is required");
+	await ensureCaptionsLinkedToJob(jobId);
 	const skip = Math.max(0, page) * Math.max(1, pageSize);
 	const take = Math.max(1, pageSize);
+	const job = await prisma.imageJob.findUnique({
+		where: { id: jobId },
+		select: { dirPath: true },
+	});
+	const dirPath = job?.dirPath;
 
 	console.log("Job Id: ", jobId)
 	const itemsRaw = await prisma.imageCaption.findMany({
-		where: { jobId, status: "CAPTIONED"},
+		where: {
+			status: "CAPTIONED",
+			OR: [
+				{ jobId },
+				...(dirPath ? [{ filePath: { startsWith: dirPath } }] : []),
+			],
+		},
 		orderBy: { createdAt: "asc" },
 		skip,
 		take,
@@ -73,7 +105,15 @@ export async function getCaptionsPage(jobId: string, page = 0, pageSize = 10) {
 		},
 	});
 
-	const totalPending = await prisma.imageCaption.count({ where: { jobId, status: "CAPTIONED" } });
+	const totalPending = await prisma.imageCaption.count({
+		where: {
+			status: "CAPTIONED",
+			OR: [
+				{ jobId },
+				...(dirPath ? [{ filePath: { startsWith: dirPath } }] : []),
+			],
+		},
+	});
 
 	const items = await Promise.all(
 		itemsRaw.map(async (it) => ({
@@ -98,6 +138,7 @@ export async function getUserBatchSummaries(userId: string) {
 	// For each job, compute available (CAPTIONED) and underReview (REVIEWED by this user)
 	const out = await Promise.all(
 		jobs.map(async (j) => {
+			await ensureCaptionsLinkedToJob(j.id);
 			const [available, underReview] = await Promise.all([
 				prisma.imageCaption.count({ where: { jobId: j.id, status: "CAPTIONED" } }),
 				prisma.imageCaption.count({ where: { jobId: j.id, status: "REVIEWED", reviewerId: userId } }),
@@ -120,9 +161,22 @@ export async function submitReviewAction(formData: FormData) {
 	const reviewerId = session?.user?.id;
 
 	// Idempotent increment: only if transitioning to REVIEWED now
-	const current = await prisma.imageCaption.findUnique({ where: { id: captionId }, select: { id: true, status: true, jobId: true } });
+	const current = await prisma.imageCaption.findUnique({
+		where: { id: captionId },
+		select: { id: true, status: true, jobId: true, filePath: true },
+	});
 	if (!current) throw new Error("Caption not found");
-	const realJobId = current.jobId || jobId || undefined;
+
+	let realJobId = current.jobId || jobId || undefined;
+	try {
+		const job = await prisma.imageJob.findUnique({
+			where: { id: jobId },
+			select: { dirPath: true },
+		});
+		if (job?.dirPath && current.filePath?.startsWith(job.dirPath)) {
+			realJobId = jobId;
+		}
+	} catch {}
 
 	if (current.status !== "REVIEWED") {
 		// Update caption, attach jobId if it was missing
@@ -133,7 +187,7 @@ export async function submitReviewAction(formData: FormData) {
 				status: "REVIEWED",
 				reviewedAt: new Date(),
 				reviewerId: reviewerId ?? undefined,
-				...(current.jobId ? {} : realJobId ? { jobId: realJobId } : {}),
+				...(realJobId ? { jobId: realJobId } : {}),
 			},
 		});
 		try {

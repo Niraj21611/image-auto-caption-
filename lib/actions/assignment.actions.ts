@@ -5,6 +5,25 @@ import * as XLSX from "xlsx";
 import prisma from "../prisma";
 import { revalidatePath } from "next/cache";
 
+async function ensureCaptionsLinkedToJob(jobId: string) {
+  if (!jobId) return 0;
+  const job = await prisma.imageJob.findUnique({
+    where: { id: jobId },
+    select: { id: true, dirPath: true },
+  });
+  if (!job?.dirPath) return 0;
+
+  const result = await prisma.imageCaption.updateMany({
+    where: {
+      jobId: { not: job.id },
+      filePath: { startsWith: job.dirPath },
+    },
+    data: { jobId: job.id },
+  });
+
+  return result.count || 0;
+}
+
 export async function listCompletedJobs() {
   const jobs = await prisma.imageJob.findMany({
     where: { status: "COMPLETED" },
@@ -90,6 +109,7 @@ export async function getUserBatchOverview(jobId: string) {
   if (!jobId) return { success: false, error: "jobId is required" };
 
   try {
+    await ensureCaptionsLinkedToJob(jobId);
     const job = await prisma.imageJob.findUnique({
       where: { id: jobId },
       select: {
@@ -141,8 +161,16 @@ export async function getProcessedCaptionsForUser(jobId: string) {
   if (!jobId) return { success: false, error: "jobId is required" };
 
   try {
+    await ensureCaptionsLinkedToJob(jobId);
+    const job = await prisma.imageJob.findUnique({
+      where: { id: jobId },
+      select: { dirPath: true },
+    });
     const where: Prisma.ImageCaptionWhereInput = {
-      jobId,
+      OR: [
+        { jobId },
+        ...(job?.dirPath ? [{ filePath: { startsWith: job.dirPath } }] : []),
+      ],
     };
 
     const itemsRaw = await prisma.imageCaption.findMany({
@@ -182,7 +210,17 @@ export async function getProcessedCaptionsPage(
   const skip = (safePage - 1) * safePageSize;
 
   try {
-    const where: Prisma.ImageCaptionWhereInput = { jobId };
+    await ensureCaptionsLinkedToJob(jobId);
+    const job = await prisma.imageJob.findUnique({
+      where: { id: jobId },
+      select: { dirPath: true },
+    });
+    const where: Prisma.ImageCaptionWhereInput = {
+      OR: [
+        { jobId },
+        ...(job?.dirPath ? [{ filePath: { startsWith: job.dirPath } }] : []),
+      ],
+    };
     if (statusFilter) {
       where.status = statusFilter;
     }
